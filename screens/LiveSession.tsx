@@ -84,12 +84,32 @@ const [manualMicToggle, setManualMicToggle] = useState(true);
   
   const [icebreaker, setIcebreaker] = useState<string | null>(null);
   const [isLoadingIcebreaker, setIsLoadingIcebreaker] = useState(false);
-  const [showExitConfirm, setShowExitConfirm] = useState(false);
-  
-  const { messages: chatMessages, sendMessage } = useChat(sessionId, user.id, user.name);
+  // Exit confirmation handler
+const handleExitSession = () => {
+    if (confirm("Are you sure you want to leave this session? This will end it for both participants.")) {
+        finishSession(true);
+    }
+};
+ const { messages: chatMessages, sendMessage } = useChat(
+    isReadyForWebRTC ? sessionId : '', 
+    user.id, 
+    user.name
+);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
-
+  
+// Track chat messages for unread count
+useEffect(() => {
+    if (!isChatOpen && chatMessages.length > 0) {
+        const lastMsg = chatMessages[chatMessages.length - 1];
+        if (lastMsg.senderId !== 'me') {
+            setUnreadChatCount(prev => prev + 1);
+        }
+    }
+    if (isChatOpen) {
+        setUnreadChatCount(0);
+    }
+}, [chatMessages, isChatOpen]);
   const [isTaskBoardOpen, setIsTaskBoardOpen] = useState(false);
   const [myTasks, setMyTasks] = useState<TodoItem[]>([]);
   const [partnerTasks, setPartnerTasks] = useState<TodoItem[]>([]);
@@ -157,17 +177,37 @@ useEffect(() => {
   };
 
   const finishSession = async (isEarlyExit: boolean) => {
-    if (!sessionId) return onEndSession();
-    try {
-        await updateDoc(doc(db, 'sessions', sessionId), {
-            status: isEarlyExit ? 'aborted' : 'completed',
-            endedAt: new Date()
-        });
-    } catch(e) { console.error(e); }
+  console.log("Finishing session:", sessionId, "Early exit:", isEarlyExit);
+  
+  // Stop all media streams
+  if (localStream) {
+      localStream.getTracks().forEach(track => {
+          track.stop();
+          console.log("Stopped track:", track.kind);
+      });
+  }
+  
+  // Update database
+  if (sessionId) {
+      try {
+          await updateDoc(doc(db, 'sessions', sessionId), {
+              status: isEarlyExit ? 'aborted' : 'completed',
+              endedAt: new Date(),
+              abortedBy: isEarlyExit ? user.id : null
+          });
+          console.log("Session updated in database");
+      } catch(e) { 
+          console.error("Failed to update session:", e); 
+      }
+  }
 
-    if (isEarlyExit) onEndSession();
-    else setPhase(SessionPhase.COMPLETED);
-  };
+  // Always exit if early, otherwise show recap
+  if (isEarlyExit) {
+      onEndSession();
+  } else {
+      setPhase(SessionPhase.COMPLETED);
+  }
+};
 
   const handleAddTask = (text: string) => {
       setMyTasks([...myTasks, { id: Math.random().toString(), text, completed: false, ownerId: 'me' }]);
@@ -216,7 +256,7 @@ useEffect(() => {
         </div>
 
         <div className="absolute top-6 right-6 pointer-events-auto flex gap-2">
-            <Button variant="danger" onClick={() => setShowExitConfirm(true)} className="py-2 px-3 text-xs"><LogOut size={14} className="mr-2"/> Exit</Button>
+            <Button variant="danger" onClick={handleExitSession} className="py-2 px-3 text-xs"><LogOut size={14} className="mr-2"/> Exit</Button>
         </div>
 
         <div className="pointer-events-auto">

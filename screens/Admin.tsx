@@ -137,28 +137,39 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
     });
   };
 
-  const handleBan = async (userId: string) => {
-    if (confirm(`Ban user ${userId} for 24 hours?`)) {
-      try {
-        const until = Date.now() + 24 * 60 * 60 * 1000;
-        await updateDoc(doc(db, 'users', userId), {
-            bannedUntil: until
-        });
-        setRefreshTrigger(prev => prev + 1);
-      } catch(e) { console.error(e); alert("Failed to ban"); }
-    }
-  };
-
-  const handleUnban = async (userId: string) => {
-    if (confirm(`Unban user ${userId}?`)) {
-        try {
-            await updateDoc(doc(db, 'users', userId), {
-                bannedUntil: null
-            });
-            setRefreshTrigger(prev => prev + 1);
-        } catch(e) { console.error(e); alert("Failed to unban"); }
+ const handleBan = async (userId: string) => {
+  const reason = prompt("Ban reason (optional):", "Admin action");
+  if (confirm(`Ban user ${userId} for 24 hours?`)) {
+    try {
+      const until = Date.now() + 24 * 60 * 60 * 1000;
+      await updateDoc(doc(db, 'users', userId), {
+          bannedUntil: until,
+          banReason: reason || "Admin action"
+      });
+      alert("User banned successfully!");
+      setRefreshTrigger(prev => prev + 1);
+    } catch(e: any) { 
+      console.error(e); 
+      alert("Failed to ban: " + e.message); 
     }
   }
+};
+
+const handleUnban = async (userId: string) => {
+  if (confirm(`Unban user ${userId}?`)) {
+      try {
+          await updateDoc(doc(db, 'users', userId), {
+              bannedUntil: null,
+              banReason: null
+          });
+          alert("User unbanned successfully!");
+          setRefreshTrigger(prev => prev + 1);
+      } catch(e: any) { 
+          console.error(e); 
+          alert("Failed to unban: " + e.message); 
+      }
+  }
+}
 
   const handleBroadcast = async () => {
       if (!broadcastMsg.trim()) return;

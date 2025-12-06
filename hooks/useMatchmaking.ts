@@ -5,14 +5,13 @@ import {
   onSnapshot, getDocs, writeBatch, serverTimestamp, Timestamp, getDoc, orderBy
 } from 'firebase/firestore';
 import { SessionConfig, User, Partner, SessionType } from '../types';
-// How long before a queue entry is considered "stale" (e.g. user crashed)
-const QUEUE_EXPIRATION_MS = 5 * 60 * 1000; // 5 Minutes
+
+const QUEUE_EXPIRATION_MS = 5 * 60 * 1000;
 
 export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) => void) => {
   const [status, setStatus] = useState<'IDLE' | 'SEARCHING' | 'MATCHED'>('IDLE');
   const [error, setError] = useState<string | null>(null);
   
-  // Store config to use in polling interval
   const activeConfig = useRef<SessionConfig | null>(null);
   const isMounted = useRef(true);
 
@@ -21,12 +20,9 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
     return () => { isMounted.current = false; };
   }, []);
 
-  // 1. CLEANUP ON WINDOW CLOSE
   useEffect(() => {
     const handleBeforeUnload = () => {
         if (user && status === 'SEARCHING') {
-            // Attempt best-effort delete (navigator.sendBeacon logic usually required here, 
-            // but for SPA we try synchronous-like async)
             deleteDoc(doc(db, 'queue', user.id)).catch(console.error);
         }
     };
@@ -35,42 +31,41 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
   }, [user, status]);
 
   const joinQueue = async (config: SessionConfig) => {
-  if (!user) return;
-  
-  // First, check if user is already in an active session
-  const existingSessionQuery = query(
-    collection(db, 'sessions'),
-    where('participants', 'array-contains', user.id),
-    where('status', '==', 'active')
-  );
-  const existingSessions = await getDocs(existingSessionQuery);
-  
-  if (!existingSessions.empty) {
-    setError("You're already in a session!");
-    return;
-  }
-  
-  setStatus('SEARCHING');
-  setError(null);
-  activeConfig.current = config;
+    if (!user) return;
+    
+    const existingSessionQuery = query(
+      collection(db, 'sessions'),
+      where('participants', 'array-contains', user.id),
+      where('status', '==', 'active')
+    );
+    const existingSessions = await getDocs(existingSessionQuery);
+    
+    if (!existingSessions.empty) {
+      setError("You're already in a session!");
+      return;
+    }
+    
+    setStatus('SEARCHING');
+    setError(null);
+    activeConfig.current = config;
 
-  try {
-    // Create/Update Queue Entry
-  await setDoc(doc(db, 'queue', user.id), {
-  userId: user.id,
-  name: user.name,
-  type: config.type,
-  duration: config.duration,
-  timestamp: serverTimestamp(),
-  status: 'waiting' 
-});
-console.log("✅ Joined queue:", {
-  userId: user.id,
-  name: user.name,
-  type: config.type,
-  duration: config.duration
-});
-      // Trigger immediate match attempt
+    try {
+      await setDoc(doc(db, 'queue', user.id), {
+        userId: user.id,
+        name: user.name,
+        type: config.type,
+        duration: config.duration,
+        timestamp: serverTimestamp(),
+        status: 'waiting' 
+      });
+
+      console.log("✅ Joined queue:", {
+        userId: user.id,
+        name: user.name,
+        type: config.type,
+        duration: config.duration
+      });
+
       attemptMatch(config);
     } catch (error: any) {
       console.error("Queue Join Error:", error);
@@ -92,7 +87,7 @@ console.log("✅ Joined queue:", {
     } catch (e) { console.error("Cancel Error", e); }
   };
 
-const attemptMatch = async (config: SessionConfig) => {
+  const attemptMatch = async (config: SessionConfig) => {
     if (!user || !activeConfig.current) return;
 
     try {
@@ -233,10 +228,8 @@ const attemptMatch = async (config: SessionConfig) => {
             activeConfig.current = null;
         }
     }
-};
+  };
 
-  // POLLING LOOP
-  // Retry matching every 3 seconds if we are still searching
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (status === 'SEARCHING') {
@@ -249,8 +242,6 @@ const attemptMatch = async (config: SessionConfig) => {
     return () => clearInterval(interval);
   }, [status]);
 
-  // SESSION LISTENER
-  // Waits for a session to be created where I am a participant
   useEffect(() => {
     if (!user || status === 'MATCHED') return;
 
@@ -265,14 +256,11 @@ const attemptMatch = async (config: SessionConfig) => {
         if (change.type === 'added') {
           const session = change.doc.data();
           
-          // Identify Partner
           const partnerInfo = session.user1.id === user.id ? session.user2 : session.user1;
           
-          // Stop polling
           activeConfig.current = null;
           setStatus('MATCHED');
           
-          // Trigger callback
           onMatch({
             id: partnerInfo.id,
             name: partnerInfo.name,

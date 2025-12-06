@@ -24,16 +24,17 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, currentScreen, o
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  useEffect(() => {
+useEffect(() => {
     if (user) {
-        const fetchNotes = () => {
-            setNotifications(getNotifications(user.id));
+        const fetchNotes = async () => {
+            const notes = await getNotifications(user.id);
+            setNotifications(notes);
         };
         fetchNotes();
         const interval = setInterval(fetchNotes, 3000);
         return () => clearInterval(interval);
     }
-  }, [user]);
+}, [user]);
 
   const handleNotificationClick = (id: string) => {
       if (user) markNotificationRead(user.id, id);

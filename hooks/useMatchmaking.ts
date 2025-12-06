@@ -87,7 +87,7 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
             collection(db, 'queue'),
             where('type', '==', config.type),
             where('duration', '==', config.duration),
-            where('mode', '==', config.mode)
+            
         );
 
         const snapshot = await getDocs(q);

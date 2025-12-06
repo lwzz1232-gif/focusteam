@@ -4,12 +4,7 @@ import {
   collection, doc, setDoc, deleteDoc, query, where, 
   onSnapshot, getDocs, writeBatch, serverTimestamp, Timestamp, getDoc 
 } from 'firebase/firestore';
-import { 
-  collection, doc, setDoc, deleteDoc, query, where, 
-  onSnapshot, getDocs, runTransaction, serverTimestamp, Timestamp 
-} from 'firebase/firestore';
 import { SessionConfig, User, Partner, SessionType } from '../types';
-
 // How long before a queue entry is considered "stale" (e.g. user crashed)
 const QUEUE_EXPIRATION_MS = 5 * 60 * 1000; // 5 Minutes
 

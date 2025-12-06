@@ -96,7 +96,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch }) => {
             ))}
 
             {/* Test Mode Button (Admin Only) */}
-            {(user.role === 'admin' || user.role === 'dev') && (
+            {user.role === 'admin' && (
                <button
                   onClick={() => setSelectedDuration(SessionDuration.TEST)}
                   className={`w-full p-4 rounded-xl border flex items-center justify-between transition-all border-dashed ${

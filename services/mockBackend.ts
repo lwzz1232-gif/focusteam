@@ -17,9 +17,24 @@ export const getLiveStats = () => ({
 });
 
 // Notifications (Still useful for Layout)
-export const getNotifications = (userId: string): Notification[] => {
-    // In a real app, you would fetch from Firestore 'notifications' collection
-    return [];
+import { db } from '../utils/firebaseConfig';
+import { collection, query, getDocs, orderBy } from 'firebase/firestore';
+
+export const getNotifications = async (userId: string): Promise<Notification[]> => {
+    try {
+      const q = query(
+        collection(db, 'users', userId, 'notifications'),
+        orderBy('timestamp', 'desc')
+      );
+      const snap = await getDocs(q);
+      return snap.docs.map(d => ({
+        ...d.data(),
+        id: d.id
+      } as Notification));
+    } catch(e) {
+      console.error("Failed to fetch notifications:", e);
+      return [];
+    }
 };
 export const markNotificationRead = (userId: string, noteId: string) => {};
 

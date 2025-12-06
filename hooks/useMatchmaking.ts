@@ -86,8 +86,7 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
         const q = query(
             collection(db, 'queue'),
             where('type', '==', config.type),
-            where('duration', '==', config.duration),
-            
+            where('duration', '==', config.duration),     
         );
 
         const snapshot = await getDocs(q);
@@ -121,13 +120,15 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
             console.log("Attempting to match with:", partnerData.name);
 
             // ATOMIC TRANSACTION
-            await runTransaction(db, async (transaction) => {
-                const myRef = doc(db, 'queue', user.id);
-                const partnerRef = doc(db, 'queue', partnerData.userId);
-                
-                // Read both
-                const myDoc = await transaction.get(myRef);
-                const partnerDoc = await transaction.get(partnerRef);
+            // ATOMIC TRANSACTION - Use batch instead for better reliability
+const batch = writeBatch(db);
+try {
+    const myRef = doc(db, 'queue', user.id);
+    const partnerRef = doc(db, 'queue', partnerData.userId);
+    
+    // Verify both still exist
+    const myDoc = await getDoc(myRef);
+    const partnerDoc = await getDoc(partnerRef);
 
                 // Validation
                 if (!myDoc.exists()) throw new Error("MY_GONE");

@@ -26,17 +26,41 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch }) => {
     { val: SessionDuration.HOUR_2, label: '2 Hours', desc: 'Deep work' },
   ];
 
-  const handleStart = () => {
+ const handleStart = () => {
+    // TEST MODE: Skip matching, go straight to session with bot
+    if (selectedDuration === SessionDuration.TEST && user.role === 'admin') {
+      // Create fake partner immediately
+      const botPartner: Partner = {
+        id: 'bot-test-user',
+        name: 'Test Bot',
+        type: selectedType
+      };
+      
+      // Skip to negotiation with instant config
+      const testConfig: SessionConfig = {
+        type: selectedType,
+        duration: SessionDuration.TEST,
+        mode: SessionMode.DEEP_WORK,
+        preTalkMinutes: 0.5, // 30s
+        postTalkMinutes: 0.5  // 30s
+      };
+      
+      // We need to modify App.tsx to handle this
+      // For now, trigger match immediately
+      setTimeout(() => {
+        onStartMatch(testConfig);
+      }, 500);
+      return;
+    }
+    
     onStartMatch({
       type: selectedType,
       duration: selectedDuration,
-      // Default values, these will be negotiated later
       mode: SessionMode.DEEP_WORK,
       preTalkMinutes: 5,
       postTalkMinutes: 5
     });
   };
-
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-4 max-w-5xl mx-auto w-full overflow-y-auto">
       <div className="w-full mb-6 text-center md:text-left">

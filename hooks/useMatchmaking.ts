@@ -96,12 +96,12 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
         // Query for potential partners
         // We filter by config. We DO NOT filter by self ID here to simplify index usage, 
         // we filter self in memory.
-        const q = query(
-            collection(db, 'queue'),
-            where('type', '==', config.type),
-            where('duration', '==', config.duration),     
-        );
-
+       const q = query(
+    collection(db, 'queue'),
+    where('type', '==', config.type),
+    where('duration', '==', config.duration),
+    orderBy('timestamp', 'asc')  // ADD THIS LINE
+);
         const snapshot = await getDocs(q);
         
         // Filter in memory:

@@ -77,9 +77,10 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   // Hook handles the heavy lifting of P2P connection
   const { localStream, remoteStream } = useWebRTC(isReadyForWebRTC ? sessionId : '', user.id, isInitiator);
 
-  // UI State
-  const [micEnabled, setMicEnabled] = useState(true);
-  const [camEnabled, setCamEnabled] = useState(true);
+ // UI State
+const [micEnabled, setMicEnabled] = useState(true);
+const [camEnabled, setCamEnabled] = useState(true);
+const [manualMicToggle, setManualMicToggle] = useState(true);
   
   const [icebreaker, setIcebreaker] = useState<string | null>(null);
   const [isLoadingIcebreaker, setIsLoadingIcebreaker] = useState(false);
@@ -106,13 +107,15 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       }
   }, [localStream, remoteStream]);
 
-  // Media Toggle Handling
-  useEffect(() => {
-      if(localStream) {
-          localStream.getAudioTracks().forEach(track => track.enabled = micEnabled);
-          localStream.getVideoTracks().forEach(track => track.enabled = camEnabled);
-      }
-  }, [micEnabled, camEnabled, localStream]);
+  // Media Toggle Handling - Force mute during Focus phase
+useEffect(() => {
+    if(localStream) {
+        // During FOCUS phase, ALWAYS mute mic regardless of user preference
+        const shouldMute = phase === SessionPhase.FOCUS ? false : micEnabled;
+        localStream.getAudioTracks().forEach(track => track.enabled = shouldMute);
+        localStream.getVideoTracks().forEach(track => track.enabled = camEnabled);
+    }
+}, [micEnabled, camEnabled, localStream, phase]);
 
 
   // Timer Logic
@@ -126,15 +129,16 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     return () => clearInterval(timer);
   }, [phase, config.duration]);
 
-  const handlePhaseTransition = () => {
-    if (phase === SessionPhase.ICEBREAKER) {
-        setPhase(SessionPhase.FOCUS);
-        setMicEnabled(false);
+ const handlePhaseTransition = () => {
+  if (phase === SessionPhase.ICEBREAKER) {
+      setPhase(SessionPhase.FOCUS);
+      setMicEnabled(false); // Force mute
+      setManualMicToggle(false); // Remember user preference
         return isTest ? 30 : (config.duration - config.preTalkMinutes - config.postTalkMinutes) * 60;
     }
-    if (phase === SessionPhase.FOCUS) {
-        setPhase(SessionPhase.DEBRIEF);
-        setMicEnabled(true);
+  if (phase === SessionPhase.FOCUS) {
+    setPhase(SessionPhase.DEBRIEF);
+    setMicEnabled(manualMicToggle); // Restore user preference
         return isTest ? 30 : config.postTalkMinutes * 60;
     }
     if (phase === SessionPhase.DEBRIEF) {
@@ -247,7 +251,25 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                      <Button onClick={handleGetIcebreaker} variant="secondary" isLoading={isLoadingIcebreaker} className="py-1 px-3 text-xs"><Sparkles size={14}/> Generate</Button>
                  </div>
              )}
-             <button onClick={() => setMicEnabled(!micEnabled)} className={`p-4 rounded-full ${micEnabled ? 'bg-slate-800 text-white' : 'bg-red-500/20 text-red-500'}`}>{micEnabled ? <Mic /> : <MicOff />}</button>
+             <button 
+    onClick={() => {
+        if (phase === SessionPhase.FOCUS) return; // Prevent toggle during focus
+        setMicEnabled(!micEnabled);
+        setManualMicToggle(!micEnabled);
+    }} 
+    disabled={phase === SessionPhase.FOCUS}
+    className={`p-4 rounded-full ${
+        phase === SessionPhase.FOCUS 
+            ? 'bg-slate-900 text-slate-600 cursor-not-allowed' 
+            : micEnabled 
+                ? 'bg-slate-800 text-white hover:bg-slate-700' 
+                : 'bg-red-500/20 text-red-500 hover:bg-red-500/30'
+    } transition-colors`}
+    title={phase === SessionPhase.FOCUS ? "Muted during Focus phase" : "Toggle microphone"}
+>
+    {micEnabled && phase !== SessionPhase.FOCUS ? <Mic /> : <MicOff />}
+    {phase === SessionPhase.FOCUS && <Lock size={12} className="absolute top-1 right-1" />}
+</button>
              <button onClick={() => setCamEnabled(!camEnabled)} className={`p-4 rounded-full ${camEnabled ? 'bg-slate-800 text-white' : 'bg-red-500/20 text-red-500'}`}>{camEnabled ? <Video /> : <VideoOff />}</button>
              <button onClick={() => { setIsChatOpen(!isChatOpen); setUnreadChatCount(0); }} className="p-4 rounded-full bg-slate-800 text-white relative">
                 <MessageSquare />

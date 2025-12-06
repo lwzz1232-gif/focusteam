@@ -35,17 +35,31 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
   }, [user, status]);
 
   const joinQueue = async (config: SessionConfig) => {
-    if (!user) return;
-    setStatus('SEARCHING');
-    setError(null);
-    activeConfig.current = config;
+  if (!user) return;
+  
+  // First, check if user is already in an active session
+  const existingSessionQuery = query(
+    collection(db, 'sessions'),
+    where('participants', 'array-contains', user.id),
+    where('status', '==', 'active')
+  );
+  const existingSessions = await getDocs(existingSessionQuery);
+  
+  if (!existingSessions.empty) {
+    setError("You're already in a session!");
+    return;
+  }
+  
+  setStatus('SEARCHING');
+  setError(null);
+  activeConfig.current = config;
 
-    try {
-      // Create/Update Queue Entry
-      await setDoc(doc(db, 'queue', user.id), {
-        userId: user.id,
-        name: user.name,
-        type: config.type,
+  try {
+    // Create/Update Queue Entry
+    await setDoc(doc(db, 'queue', user.id), {
+      userId: user.id,
+      name: user.name,
+      type: config.type,
         duration: config.duration,
         mode: config.mode,
         timestamp: serverTimestamp(),

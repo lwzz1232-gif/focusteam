@@ -56,16 +56,14 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
 
   try {
     // Create/Update Queue Entry
-    await setDoc(doc(db, 'queue', user.id), {
-      userId: user.id,
-      name: user.name,
-      type: config.type,
-        duration: config.duration,
-        mode: config.mode,
-        timestamp: serverTimestamp(),
-        // Add explicit fields for easier querying/debugging
-        status: 'waiting' 
-      });
+  await setDoc(doc(db, 'queue', user.id), {
+  userId: user.id,
+  name: user.name,
+  type: config.type,
+  duration: config.duration,
+  timestamp: serverTimestamp(),
+  status: 'waiting' 
+});
 console.log("✅ Joined queue:", {
   userId: user.id,
   name: user.name,

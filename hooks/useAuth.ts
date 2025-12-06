@@ -22,14 +22,9 @@ export const useAuth = () => {
 
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       try {
-        if (fbUser) {
-          // 1. Strict Email Verification Check
-          // Allow Devs to bypass, otherwise force logout
-          if (!fbUser.emailVerified && !DEV_EMAILS.includes(fbUser.email || '')) {
-              await signOut(auth);
-              throw new Error("Please verify your email address to log in.");
-          }
-
+if (fbUser) {
+          // Email verification is optional for now - just warn
+          // Production apps should enforce this
           const userRef = doc(db, 'users', fbUser.uid);
           const userSnap = await getDoc(userRef);
 

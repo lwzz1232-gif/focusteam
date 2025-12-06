@@ -6,7 +6,8 @@ import { User } from '../types';
 
 // Strict Dev/Admin Whitelist
 // These accounts will automatically get 'dev' role upon login/signup
-const DEV_EMAILS = ['benchoaib2@gmail.com', 'kirito63561@gmail.com'];
+// Admin Whitelist - these emails automatically get admin role
+const ADMIN_EMAILS = ['benchoaib2@gmail.com', 'kirito63561@gmail.com'];
 
 export const useAuth = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -57,12 +58,11 @@ if (fbUser) {
           }
 
           // Force Dev Role for specific emails
-          if (fbUser.email && DEV_EMAILS.includes(fbUser.email)) {
-            role = 'dev';
-            // Optionally update DB to reflect this power immediately
-             await setDoc(userRef, { role: 'dev' }, { merge: true });
-          }
-
+         // Force Admin Role for specific emails
+if (fbUser.email && ADMIN_EMAILS.includes(fbUser.email)) {
+  role = 'admin';
+  await setDoc(userRef, { role: 'admin' }, { merge: true });
+}
           setUser({
             id: fbUser.uid,
             email: fbUser.email || '',

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { db } from '../utils/firebaseConfig';
 import { 
   collection, doc, setDoc, deleteDoc, query, where, 
-  onSnapshot, getDocs, writeBatch, serverTimestamp, Timestamp, getDoc 
+  onSnapshot, getDocs, writeBatch, serverTimestamp, Timestamp, getDoc, orderBy
 } from 'firebase/firestore';
 import { SessionConfig, User, Partner, SessionType } from '../types';
 // How long before a queue entry is considered "stale" (e.g. user crashed)

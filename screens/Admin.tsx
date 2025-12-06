@@ -4,7 +4,7 @@ import { collection, query, orderBy, getDocs, updateDoc, doc, limit, where, star
 import { Report, SessionLog, ChatMessage, User, BanHistoryLog } from '../types';
 import { Button } from '../components/Button';
 import { Shield, AlertTriangle, UserX, UserCheck, History, XCircle, CheckCircle, ArrowLeft, X, FileText, Download, Users, Radio, Activity, Zap, Search, ChevronDown, ArrowRight } from 'lucide-react';
-
+import { collection, query, orderBy, getDocs, updateDoc, doc, limit, where, startAfter, DocumentData, QueryDocumentSnapshot, writeBatch } from 'firebase/firestore';
 interface AdminProps {
   onBack: () => void;
 }
@@ -172,10 +172,33 @@ const handleUnban = async (userId: string) => {
 }
 
   const handleBroadcast = async () => {
-      if (!broadcastMsg.trim()) return;
-      alert(`[SIMULATED] Broadcast sent: ${broadcastMsg}`);
+    if (!broadcastMsg.trim()) return;
+    
+    try {
+      // Get all users
+      const usersSnap = await getDocs(collection(db, 'users'));
+      
+      // Create notification for each user
+      const batch = writeBatch(db);
+      usersSnap.forEach(userDoc => {
+        const notifRef = doc(collection(db, 'users', userDoc.id, 'notifications'));
+        batch.set(notifRef, {
+          text: broadcastMsg,
+          timestamp: Date.now(),
+          read: false,
+          type: 'system'
+        });
+      });
+      
+      await batch.commit();
+      alert(`✅ Broadcast sent to ${usersSnap.size} users!`);
       setBroadcastMsg('');
-  };
+      
+    } catch(e: any) {
+      console.error(e);
+      alert("Failed to broadcast: " + e.message);
+    }
+};
 
   const getBanInfo = (userId: string) => {
     const user = users.find(u => u.id === userId);

@@ -10,7 +10,7 @@ import { useChat } from '../hooks/useChat';
 import { useWebRTC } from '../hooks/useWebRTC'; 
 import { db } from '../utils/firebaseConfig';
 import { collection, query, where, getDocs, updateDoc, doc, addDoc } from 'firebase/firestore';
-
+import { collection, query, where, getDocs, updateDoc, doc, addDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
 interface LiveSessionProps {
   user: User;
   partner: Partner;
@@ -113,7 +113,24 @@ useEffect(() => {
   const [isTaskBoardOpen, setIsTaskBoardOpen] = useState(false);
   const [myTasks, setMyTasks] = useState<TodoItem[]>([]);
   const [partnerTasks, setPartnerTasks] = useState<TodoItem[]>([]);
-
+// Sync tasks to Firestore
+useEffect(() => {
+    if (!sessionId || !isReadyForWebRTC) return;
+    
+    // Listen to partner's tasks
+    const tasksRef = collection(db, 'sessions', sessionId, 'tasks');
+    const q = query(tasksRef, where('ownerId', '!=', user.id));
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+        const tasks: TodoItem[] = [];
+        snapshot.forEach(doc => {
+            tasks.push({ ...doc.data(), id: doc.id } as TodoItem);
+        });
+        setPartnerTasks(tasks);
+    });
+    
+    return () => unsubscribe();
+}, [sessionId, isReadyForWebRTC, user.id]);
   const myVideoRef = useRef<HTMLVideoElement>(null);
   const partnerVideoRef = useRef<HTMLVideoElement>(null);
 
@@ -209,15 +226,65 @@ useEffect(() => {
   }
 };
 
-  const handleAddTask = (text: string) => {
-      setMyTasks([...myTasks, { id: Math.random().toString(), text, completed: false, ownerId: 'me' }]);
-  };
-  const handleToggleTask = (taskId: string) => {
-      setMyTasks(myTasks.map(t => t.id === taskId ? { ...t, completed: !t.completed } : t));
-  };
-  const handleDeleteTask = (taskId: string) => {
-      setMyTasks(myTasks.filter(t => t.id !== taskId));
-  };
+ const handleAddTask = async (text: string) => {
+    const newTask: TodoItem = { 
+        id: Math.random().toString(), 
+        text, 
+        completed: false, 
+        ownerId: user.id 
+    };
+    
+    setMyTasks([...myTasks, newTask]);
+    
+    // Save to Firestore
+    if (sessionId) {
+        try {
+            await addDoc(collection(db, 'sessions', sessionId, 'tasks'), newTask);
+        } catch (e) {
+            console.error("Failed to save task:", e);
+        }
+    }
+};
+const handleToggleTask = async (taskId: string) => {
+    const updatedTasks = myTasks.map(t => 
+        t.id === taskId ? { ...t, completed: !t.completed } : t
+    );
+    setMyTasks(updatedTasks);
+    
+    // Update in Firestore
+    if (sessionId) {
+        const taskDoc = updatedTasks.find(t => t.id === taskId);
+        if (taskDoc) {
+            try {
+                const tasksRef = collection(db, 'sessions', sessionId, 'tasks');
+                const q = query(tasksRef, where('id', '==', taskId));
+                const snapshot = await getDocs(q);
+                if (!snapshot.empty) {
+                    await updateDoc(snapshot.docs[0].ref, { completed: taskDoc.completed });
+                }
+            } catch (e) {
+                console.error("Failed to update task:", e);
+            }
+        }
+    }
+};
+  const handleDeleteTask = async (taskId: string) => {
+    setMyTasks(myTasks.filter(t => t.id !== taskId));
+    
+    // Delete from Firestore
+    if (sessionId) {
+        try {
+            const tasksRef = collection(db, 'sessions', sessionId, 'tasks');
+            const q = query(tasksRef, where('id', '==', taskId));
+            const snapshot = await getDocs(q);
+            if (!snapshot.empty) {
+                await deleteDoc(snapshot.docs[0].ref);
+            }
+        } catch (e) {
+            console.error("Failed to delete task:", e);
+        }
+    }
+};
 
   return (
     <div className="flex-1 relative bg-black overflow-hidden">

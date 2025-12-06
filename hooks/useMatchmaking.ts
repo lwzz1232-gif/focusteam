@@ -2,6 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { db } from '../utils/firebaseConfig';
 import { 
   collection, doc, setDoc, deleteDoc, query, where, 
+  onSnapshot, getDocs, writeBatch, serverTimestamp, Timestamp, getDoc 
+} from 'firebase/firestore';
+import { 
+  collection, doc, setDoc, deleteDoc, query, where, 
   onSnapshot, getDocs, runTransaction, serverTimestamp, Timestamp 
 } from 'firebase/firestore';
 import { SessionConfig, User, Partner, SessionType } from '../types';
@@ -137,24 +141,25 @@ try {
 // Create Session
 
                 // Create Session
-                const newSessionRef = doc(collection(db, 'sessions'));
-                transaction.set(newSessionRef, {
-                    // User1 is strictly the one executing the transaction (Me)
-                    // This creates a deterministic Initiator for WebRTC
-                    user1: { id: user.id, name: user.name },
-                    user2: { id: partnerData.userId, name: partnerData.name },
-                    participants: [user.id, partnerData.userId],
-                    config: config,
-                    status: 'active',
-                    createdAt: serverTimestamp()
-                });
+const newSessionRef = doc(collection(db, 'sessions'));
+batch.set(newSessionRef, {
+    user1: { id: user.id, name: user.name },
+    user2: { id: partnerData.userId, name: partnerData.name },
+    participants: [user.id, partnerData.userId],
+    config: config,
+    status: 'active',
+    createdAt: serverTimestamp()
+});
 
-                // Cleanup Queue
-                transaction.delete(myRef);
-                transaction.delete(partnerRef);
-            });
-            
-            // If successful, the onSnapshot listener below will trigger the UI update.
+// Cleanup Queue
+batch.delete(myRef);
+batch.delete(partnerRef);
+
+await batch.commit();
+            console.log("Match created successfully!");
+} catch (innerErr: any) {
+    throw innerErr;
+}
         }
     } catch (e: any) {
         // "PARTNER_GONE" is common in high concurrency, just retry next poll

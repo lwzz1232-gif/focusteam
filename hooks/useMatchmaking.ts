@@ -133,41 +133,63 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
             console.log("Attempting to match with:", partnerData.name);
 
             // ATOMIC TRANSACTION
-            // ATOMIC TRANSACTION - Use batch instead for better reliability
-const batch = writeBatch(db);
-try {
+      if (potentialMatch) {
+    const partnerData = potentialMatch.data();
+    console.log("Attempting to match with:", partnerData.name);
+
+    // Use batch with verification
+    const batch = writeBatch(db);
     const myRef = doc(db, 'queue', user.id);
     const partnerRef = doc(db, 'queue', partnerData.userId);
     
-    // Verify both still exist
-    const myDoc = await getDoc(myRef);
-    const partnerDoc = await getDoc(partnerRef);
+    try {
+        // Double-check both still exist
+        const [myDoc, partnerDoc] = await Promise.all([
+            getDoc(myRef),
+            getDoc(partnerRef)
+        ]);
+        
+        if (!myDoc.exists() || !partnerDoc.exists()) {
+            console.log("Partner already matched, trying again...");
+            return;
+        }
+        
+        // Check if partner is already in a session
+        const partnerSessionCheck = query(
+            collection(db, 'sessions'),
+            where('participants', 'array-contains', partnerData.userId),
+            where('status', '==', 'active')
+        );
+        const partnerSessions = await getDocs(partnerSessionCheck);
+        
+        if (!partnerSessions.empty) {
+            console.log("Partner already in session, trying again...");
+            return;
+        }
 
-               if (!myDoc.exists() || !partnerDoc.exists()) {
-    throw new Error("PARTNER_GONE");
-}
+        // Create Session
+        const newSessionRef = doc(collection(db, 'sessions'));
+        batch.set(newSessionRef, {
+            user1: { id: user.id, name: user.name },
+            user2: { id: partnerData.userId, name: partnerData.name },
+            participants: [user.id, partnerData.userId],
+            config: config,
+            status: 'active',
+            createdAt: serverTimestamp()
+        });
 
-// Create Session
+        // Remove both from queue
+        batch.delete(myRef);
+        batch.delete(partnerRef);
 
-                // Create Session
-const newSessionRef = doc(collection(db, 'sessions'));
-batch.set(newSessionRef, {
-    user1: { id: user.id, name: user.name },
-    user2: { id: partnerData.userId, name: partnerData.name },
-    participants: [user.id, partnerData.userId],
-    config: config,
-    status: 'active',
-    createdAt: serverTimestamp()
-});
-
-// Cleanup Queue
-batch.delete(myRef);
-batch.delete(partnerRef);
-
-await batch.commit();
-            console.log("Match created successfully!");
-} catch (innerErr: any) {
-    throw innerErr;
+        await batch.commit();
+        console.log("Match created successfully!");
+        
+    } catch (err: any) {
+        if (err.message !== "PARTNER_GONE") {
+            console.error("Match error:", err);
+        }
+    }
 }
         }
     } catch (e: any) {

@@ -98,7 +98,9 @@ const attemptMatch = async (config: SessionConfig) => {
     if (!user || !activeConfig.current) return;
 
     try {
-        console.log("🔍 Searching for match with:", {
+        console.log("🔍 [MATCH] Starting search for:", {
+            myId: user.id,
+            myName: user.name,
             type: config.type,
             duration: config.duration
         });
@@ -111,25 +113,55 @@ const attemptMatch = async (config: SessionConfig) => {
 
         const snapshot = await getDocs(q);
         
-        console.log("📊 Found in queue:", snapshot.size, "users");
-        snapshot.forEach(doc => {
-            console.log("  - User:", doc.data().name, doc.data());
-        });
+        console.log("📊 [MATCH] Raw query results:", snapshot.size, "total users");
         
-        // Filter in memory:
-        // 1. Not me
-        // 2. Not stale (older than 5 mins)
+        // Log ALL users in queue
+        snapshot.docs.forEach(d => {
+            console.log("  👤 Found:", {
+                id: d.id,
+                name: d.data().name,
+                type: d.data().type,
+                duration: d.data().duration,
+                timestamp: d.data().timestamp
+            });
+        });
+
+        // Filter in memory
         const now = Date.now();
         const validPartners = snapshot.docs.filter(d => {
             const data = d.data();
-            if (d.id === user.id) return false;
             
-            // Check timestamp
-            const createdAt = data.timestamp instanceof Timestamp ? data.timestamp.toMillis() : now;
-            if (now - createdAt > QUEUE_EXPIRATION_MS) return false; // Stale
+            console.log(`  🔎 Checking ${data.name}:`, {
+                isMe: d.id === user.id,
+                hasTimestamp: !!data.timestamp,
+                age: data.timestamp ? `${Math.round((now - data.timestamp.toMillis()) / 1000)}s` : 'no timestamp'
+            });
+            
+            // Not me
+            if (d.id === user.id) {
+                console.log("    ❌ Skipping: It's me");
+                return false;
+            }
+            
+            // Check timestamp exists
+            if (!data.timestamp) {
+                console.log("    ❌ Skipping: No timestamp");
+                return false;
+            }
+            
+            const createdAt = data.timestamp.toMillis();
+            const age = now - createdAt;
+            
+            if (age > QUEUE_EXPIRATION_MS) {
+                console.log(`    ❌ Skipping: Too old (${Math.round(age/1000)}s)`);
+                return false;
+            }
 
+            console.log("    ✅ VALID PARTNER!");
             return true;
         });
+
+        console.log("✅ [MATCH] Valid partners found:", validPartners.length);
 
         // Sort by oldest first (FIFO)
         validPartners.sort((a, b) => {
@@ -142,81 +174,135 @@ const attemptMatch = async (config: SessionConfig) => {
 
         if (potentialMatch) {
             const partnerData = potentialMatch.data();
-            console.log("Attempting to match with:", partnerData.name);
+            console.log("🎯 [MATCH] Attempting match with:", partnerData.name);
 
-            // ATOMIC TRANSACTION
-      if (potentialMatch) {
-    const partnerData = potentialMatch.data();
-    console.log("Attempting to match with:", partnerData.name);
+            // Use batch with verification
+            const batch = writeBatch(db);
+            const myRef = doc(db, 'queue', user.id);
+            const partnerRef = doc(db, 'queue', partnerData.userId);
+            
+            try {
+                // Double-check both still exist
+                const [myDoc, partnerDoc] = await Promise.all([
+                    getDoc(myRef),
+                    getDoc(partnerRef)
+                ]);
+                
+                if (!myDoc.exists()) {
+                    console.log("❌ [MATCH] My queue entry gone");
+                    return;
+                }
+                
+                if (!partnerDoc.exists()) {
+                    console.log("❌ [MATCH] Partner queue entry gone");
+                    return;
+                }
+                
+                // Check if partner is already in a session
+                const partnerSessionCheck = query(
+                    collection(db, 'sessions'),
+                    where('participants', 'array-contains', partnerData.userId),
+                    where('status', '==', 'active')
+                );
+                const partnerSessions = await getDocs(partnerSessionCheck);
+                
+                if (!partnerSessions.empty) {
+                    console.log("❌ [MATCH] Partner already in session");
+                    return;
+                }
 
-    // Use batch with verification
-    const batch = writeBatch(db);
-    const myRef = doc(db, 'queue', user.id);
-    const partnerRef = doc(db, 'queue', partnerData.userId);
-    
-    try {
-        // Double-check both still exist
-        const [myDoc, partnerDoc] = await Promise.all([
-            getDoc(myRef),
-            getDoc(partnerRef)
-        ]);
-        
-        if (!myDoc.exists() || !partnerDoc.exists()) {
-            console.log("Partner already matched, trying again...");
-            return;
-        }
-        
-        // Check if partner is already in a session
-        const partnerSessionCheck = query(
-            collection(db, 'sessions'),
-            where('participants', 'array-contains', partnerData.userId),
-            where('status', '==', 'active')
-        );
-        const partnerSessions = await getDocs(partnerSessionCheck);
-        
-        if (!partnerSessions.empty) {
-            console.log("Partner already in session, trying again...");
-            return;
-        }
+                console.log("💾 [MATCH] Creating session...");
 
-        // Create Session
-        const newSessionRef = doc(collection(db, 'sessions'));
-        batch.set(newSessionRef, {
-            user1: { id: user.id, name: user.name },
-            user2: { id: partnerData.userId, name: partnerData.name },
-            participants: [user.id, partnerData.userId],
-            config: config,
-            status: 'active',
-            createdAt: serverTimestamp()
-        });
+                // Create Session
+                const newSessionRef = doc(collection(db, 'sessions'));
+                batch.set(newSessionRef, {
+                    user1: { id: user.id, name: user.name },
+                    user2: { id: partnerData.userId, name: partnerData.name },
+                    participants: [user.id, partnerData.userId],
+                    config: config,
+                    status: 'active',
+                    createdAt: serverTimestamp()
+                });
 
-        // Remove both from queue
-        batch.delete(myRef);
-        batch.delete(partnerRef);
+                // Remove both from queue
+                batch.delete(myRef);
+                batch.delete(partnerRef);
 
-        await batch.commit();
-        console.log("Match created successfully!");
-        
-    } catch (err: any) {
-        if (err.message !== "PARTNER_GONE") {
-            console.error("Match error:", err);
-        }
-    }
-}
+                await batch.commit();
+                console.log("🎉 [MATCH] Match created successfully! Session ID:", newSessionRef.id);
+                
+            } catch (err) {
+                console.error("❌ [MATCH] Batch commit error:", err);
+            }
+        } else {
+            console.log("⏳ [MATCH] No valid partners yet, will retry in 3s");
         }
     } catch (e: any) {
-        // "PARTNER_GONE" is common in high concurrency, just retry next poll
-        if (e.message !== "PARTNER_GONE" && e.message !== "MY_GONE") {
-             // If it's a missing index error, alert the UI
-             if (e.code === 'failed-precondition' || e.toString().includes('index')) {
-                setError(e.message);
-                activeConfig.current = null;
-             } else {
-                 console.log("Match attempt skipped:", e.message);
-             }
+        console.error("❌ [MATCH] Error in attemptMatch:", e);
+        if (e.code === 'failed-precondition' || e.toString().includes('index')) {
+            console.error("🔗 [INDEX] Missing Firestore Index!");
+            setError(`Missing Firestore Index. Error: ${e.message}`);
+            activeConfig.current = null;
         }
     }
   };
+```
+
+---
+
+## **Now Test and Check Console**
+
+1. **Open browser console** (F12) on BOTH devices
+2. **Start searching** on both devices
+3. **Look for these specific messages:**
+
+You should see something like:
+```
+🔍 [MATCH] Starting search for: {myId: "abc", myName: "User1", type: "Study", duration: 30}
+📊 [MATCH] Raw query results: 2 total users
+  👤 Found: {id: "abc", name: "User1", type: "Study", duration: 30}
+  👤 Found: {id: "xyz", name: "User2", type: "Study", duration: 30}
+  🔎 Checking User1: {isMe: true, hasTimestamp: true, age: "5s"}
+    ❌ Skipping: It's me
+  🔎 Checking User2: {isMe: false, hasTimestamp: true, age: "3s"}
+    ✅ VALID PARTNER!
+✅ [MATCH] Valid partners found: 1
+🎯 [MATCH] Attempting match with: User2
+💾 [MATCH] Creating session...
+🎉 [MATCH] Match created successfully! Session ID: abc123def
+```
+
+---
+
+## **Common Issues to Look For:**
+
+### **Issue 1: No Timestamp**
+If you see:
+```
+❌ Skipping: No timestamp
+```
+
+**Fix:** The `serverTimestamp()` might not be working. Check the Firestore console and verify the `timestamp` field exists in queue documents.
+
+---
+
+### **Issue 2: Type/Duration Mismatch**
+If query returns 0 users:
+```
+📊 [MATCH] Raw query results: 0 total users
+```
+
+Check in Firestore console:
+- Field `type` is exactly `"Study"` (capital S)
+- Field `duration` is number `30` (not string `"30"`)
+
+---
+
+### **Issue 3: Both Users Trying to Match Each Other Simultaneously**
+
+If you see:
+```
+❌ [MATCH] Partner queue entry gone
 
   // POLLING LOOP
   // Retry matching every 3 seconds if we are still searching

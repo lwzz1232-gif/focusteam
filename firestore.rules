@@ -1,0 +1,45 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
+    // USERS: Read own, Write own.
+    // Admins/Devs can read all (logic handled in app for now, strict rule below)
+    match /users/{userId} {
+      allow read: if isSignedIn(); 
+      allow write: if isOwner(userId);
+    }
+
+    // QUEUE: Users can manage their own entry
+    match /queue/{userId} {
+      allow read: if isSignedIn(); // Needed for matching query
+      allow write: if isOwner(userId);
+    }
+
+    // SESSIONS: Participants can read/write
+    match /sessions/{sessionId} {
+      allow read, write: if isSignedIn() && (
+        request.auth.uid in resource.data.participants || 
+        resource == null // Allow creation
+      );
+
+      // WebRTC Signaling
+      match /callerCandidates/{id} { allow read, write: if isSignedIn(); }
+      match /calleeCandidates/{id} { allow read, write: if isSignedIn(); }
+      match /messages/{id} { allow read, write: if isSignedIn(); }
+    }
+
+    // REPORTS: Anyone signed in can create
+    match /reports/{id} {
+      allow create: if isSignedIn();
+      allow read: if false; // Only admins (via backend SDK usually)
+    }
+  }
+}

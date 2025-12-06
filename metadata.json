@@ -1,0 +1,8 @@
+{
+  "name": "FocusTwin - Productivity Matcher",
+  "description": "A productivity platform matching students and workers for focused study sessions with video accountability.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

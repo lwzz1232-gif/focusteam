@@ -50,7 +50,7 @@ export interface User {
   id: string;
   email: string;
   name: string;
-  role: 'user' | 'admin' | 'dev';
+  role: 'user' | 'admin';
   emailVerified: boolean;
   avatar?: string;
   bannedUntil?: number; // timestamp

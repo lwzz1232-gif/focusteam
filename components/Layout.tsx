@@ -16,7 +16,7 @@ interface LayoutProps {
 export const Layout: React.FC<LayoutProps> = ({ children, user, currentScreen, onLogout, onAdminClick }) => {
   const showLogout = currentScreen === Screen.DASHBOARD;
   // FIX: Allow both 'admin' and 'dev' roles to access admin features
-  const showAdmin = (user?.role === 'admin' || user?.role === 'dev') && currentScreen === Screen.DASHBOARD;
+ const showAdmin = user?.role === 'admin' && currentScreen === Screen.DASHBOARD;
   const showFooter = currentScreen !== Screen.SPLASH && currentScreen !== Screen.SESSION;
   const showNotifications = user && currentScreen !== Screen.SPLASH && currentScreen !== Screen.SESSION;
 

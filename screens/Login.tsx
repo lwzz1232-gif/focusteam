@@ -39,7 +39,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
       }
   };
 
-  const handleAuth = async (isGoogle: boolean = false, e?: React.FormEvent) => {
+ const handleAuth = async (isGoogle: boolean = false, e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setError('');
     setIsLoading(true);
@@ -58,7 +58,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
             if (!docSnap.exists()) isNewUser = true;
         } else {
             if (isSignup) {
-                if (password.length < 8) throw new Error("Password must be 8+ chars.");
+                if (password.length < 6) throw new Error("Password must be 6+ chars.");
                 if (password !== confirmPassword) throw new Error("Passwords do not match.");
                 if (!agreedToTerms) throw new Error("Please agree to terms.");
 

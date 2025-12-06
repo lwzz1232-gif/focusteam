@@ -113,7 +113,6 @@ const attemptMatch = async (config: SessionConfig) => {
         
         console.log("📊 [MATCH] Raw query results:", snapshot.size, "total users");
         
-        // Log ALL users in queue
         snapshot.docs.forEach(d => {
             console.log("  👤 Found:", {
                 id: d.id,
@@ -124,7 +123,6 @@ const attemptMatch = async (config: SessionConfig) => {
             });
         });
 
-        // Filter in memory
         const now = Date.now();
         const validPartners = snapshot.docs.filter(d => {
             const data = d.data();
@@ -135,13 +133,11 @@ const attemptMatch = async (config: SessionConfig) => {
                 age: data.timestamp ? `${Math.round((now - data.timestamp.toMillis()) / 1000)}s` : 'no timestamp'
             });
             
-            // Not me
             if (d.id === user.id) {
                 console.log("    ❌ Skipping: It's me");
                 return false;
             }
             
-            // Check timestamp exists
             if (!data.timestamp) {
                 console.log("    ❌ Skipping: No timestamp");
                 return false;
@@ -161,7 +157,6 @@ const attemptMatch = async (config: SessionConfig) => {
 
         console.log("✅ [MATCH] Valid partners found:", validPartners.length);
 
-        // Sort by oldest first (FIFO)
         validPartners.sort((a, b) => {
             const tA = a.data().timestamp?.toMillis() || 0;
             const tB = b.data().timestamp?.toMillis() || 0;
@@ -174,13 +169,11 @@ const attemptMatch = async (config: SessionConfig) => {
             const partnerData = potentialMatch.data();
             console.log("🎯 [MATCH] Attempting match with:", partnerData.name);
 
-            // Use batch with verification
             const batch = writeBatch(db);
             const myRef = doc(db, 'queue', user.id);
             const partnerRef = doc(db, 'queue', partnerData.userId);
             
             try {
-                // Double-check both still exist
                 const [myDoc, partnerDoc] = await Promise.all([
                     getDoc(myRef),
                     getDoc(partnerRef)
@@ -196,7 +189,6 @@ const attemptMatch = async (config: SessionConfig) => {
                     return;
                 }
                 
-                // Check if partner is already in a session
                 const partnerSessionCheck = query(
                     collection(db, 'sessions'),
                     where('participants', 'array-contains', partnerData.userId),
@@ -211,7 +203,6 @@ const attemptMatch = async (config: SessionConfig) => {
 
                 console.log("💾 [MATCH] Creating session...");
 
-                // Create Session
                 const newSessionRef = doc(collection(db, 'sessions'));
                 batch.set(newSessionRef, {
                     user1: { id: user.id, name: user.name },
@@ -222,7 +213,6 @@ const attemptMatch = async (config: SessionConfig) => {
                     createdAt: serverTimestamp()
                 });
 
-                // Remove both from queue
                 batch.delete(myRef);
                 batch.delete(partnerRef);
 
@@ -243,64 +233,7 @@ const attemptMatch = async (config: SessionConfig) => {
             activeConfig.current = null;
         }
     }
-  };
-```
-
----
-
-## **Now Test and Check Console**
-
-1. **Open browser console** (F12) on BOTH devices
-2. **Start searching** on both devices
-3. **Look for these specific messages:**
-
-You should see something like:
-```
-🔍 [MATCH] Starting search for: {myId: "abc", myName: "User1", type: "Study", duration: 30}
-📊 [MATCH] Raw query results: 2 total users
-  👤 Found: {id: "abc", name: "User1", type: "Study", duration: 30}
-  👤 Found: {id: "xyz", name: "User2", type: "Study", duration: 30}
-  🔎 Checking User1: {isMe: true, hasTimestamp: true, age: "5s"}
-    ❌ Skipping: It's me
-  🔎 Checking User2: {isMe: false, hasTimestamp: true, age: "3s"}
-    ✅ VALID PARTNER!
-✅ [MATCH] Valid partners found: 1
-🎯 [MATCH] Attempting match with: User2
-💾 [MATCH] Creating session...
-🎉 [MATCH] Match created successfully! Session ID: abc123def
-```
-
----
-
-## **Common Issues to Look For:**
-
-### **Issue 1: No Timestamp**
-If you see:
-```
-❌ Skipping: No timestamp
-```
-
-**Fix:** The `serverTimestamp()` might not be working. Check the Firestore console and verify the `timestamp` field exists in queue documents.
-
----
-
-### **Issue 2: Type/Duration Mismatch**
-If query returns 0 users:
-```
-📊 [MATCH] Raw query results: 0 total users
-```
-
-Check in Firestore console:
-- Field `type` is exactly `"Study"` (capital S)
-- Field `duration` is number `30` (not string `"30"`)
-
----
-
-### **Issue 3: Both Users Trying to Match Each Other Simultaneously**
-
-If you see:
-```
-❌ [MATCH] Partner queue entry gone
+};
 
   // POLLING LOOP
   // Retry matching every 3 seconds if we are still searching

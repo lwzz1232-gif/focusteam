@@ -66,7 +66,12 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
         // Add explicit fields for easier querying/debugging
         status: 'waiting' 
       });
-
+console.log("✅ Joined queue:", {
+  userId: user.id,
+  name: user.name,
+  type: config.type,
+  duration: config.duration
+});
       // Trigger immediate match attempt
       attemptMatch(config);
     } catch (error: any) {
@@ -89,20 +94,27 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
     } catch (e) { console.error("Cancel Error", e); }
   };
 
-  const attemptMatch = async (config: SessionConfig) => {
+const attemptMatch = async (config: SessionConfig) => {
     if (!user || !activeConfig.current) return;
 
     try {
-        // Query for potential partners
-        // We filter by config. We DO NOT filter by self ID here to simplify index usage, 
-        // we filter self in memory.
-       const q = query(
-    collection(db, 'queue'),
-    where('type', '==', config.type),
-    where('duration', '==', config.duration),
-    orderBy('timestamp', 'asc')  // ADD THIS LINE
-);
+        console.log("🔍 Searching for match with:", {
+            type: config.type,
+            duration: config.duration
+        });
+
+        const q = query(
+            collection(db, 'queue'),
+            where('type', '==', config.type),
+            where('duration', '==', config.duration)
+        );
+
         const snapshot = await getDocs(q);
+        
+        console.log("📊 Found in queue:", snapshot.size, "users");
+        snapshot.forEach(doc => {
+            console.log("  - User:", doc.data().name, doc.data());
+        });
         
         // Filter in memory:
         // 1. Not me

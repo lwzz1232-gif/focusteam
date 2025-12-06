@@ -130,9 +130,11 @@ try {
     const myDoc = await getDoc(myRef);
     const partnerDoc = await getDoc(partnerRef);
 
-                // Validation
-                if (!myDoc.exists()) throw new Error("MY_GONE");
-                if (!partnerDoc.exists()) throw new Error("PARTNER_GONE");
+               if (!myDoc.exists() || !partnerDoc.exists()) {
+    throw new Error("PARTNER_GONE");
+}
+
+// Create Session
 
                 // Create Session
                 const newSessionRef = doc(collection(db, 'sessions'));

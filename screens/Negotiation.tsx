@@ -91,7 +91,7 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, onNeg
       });
 
       setStep('REVIEW');
-    }, 1500); // Short wait
+    }, 3000); // Short wait
   };
 
   useEffect(() => {
@@ -105,9 +105,9 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, onNeg
 
   useEffect(() => {
     if (step === 'AGREED' && finalConfig) {
-      const timer = setTimeout(() => {
-        onNegotiationComplete(finalConfig);
-      }, 3000); // Show success for 3s
+     const timer = setTimeout(() => {
+  setStep('AGREED');
+}, 5000); // Show review for 5s
       return () => clearTimeout(timer);
     }
   }, [step, finalConfig, onNegotiationComplete]);

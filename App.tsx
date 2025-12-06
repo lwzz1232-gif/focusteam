@@ -98,12 +98,26 @@ export default function App() {
       
       {currentScreen === Screen.LOGIN && <Login onLogin={() => {}} />}
 
-      {currentScreen === Screen.DASHBOARD && user && (
-          <Dashboard 
-            user={user} 
-            onStartMatch={(config) => { setSessionConfig(config); setCurrentScreen(Screen.MATCHING); }} 
-          />
-      )}
+     {currentScreen === Screen.DASHBOARD && user && (
+    <Dashboard 
+      user={user} 
+      onStartMatch={(config) => { 
+        setSessionConfig(config); 
+        // TEST MODE: Skip matching for admins
+        if (config.duration === SessionDuration.TEST && user.role === 'admin') {
+          const botPartner: Partner = {
+            id: 'bot-test-' + Date.now(),
+            name: 'Test Bot',
+            type: config.type
+          };
+          setPartner(botPartner);
+          setCurrentScreen(Screen.SESSION); // Skip matching & negotiation
+        } else {
+          setCurrentScreen(Screen.MATCHING);
+        }
+      }} 
+    />
+)}
 
       {currentScreen === Screen.MATCHING && user && (
         <Matching 

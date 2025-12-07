@@ -1,8 +1,9 @@
 
 import React, { useState } from 'react';
 import { Button } from '../components/Button';
-import { SessionType, SessionDuration, SessionConfig, SessionMode, User } from '../types';
+import { SessionType, SessionDuration, SessionConfig, SessionMode, User, Partner } from '../types';
 import { Briefcase, BookOpen, Code, Clock, Coffee, Play, FlaskConical } from 'lucide-react';
+import { Button } from '../components/Button';
 
 interface DashboardProps {
   user: User;

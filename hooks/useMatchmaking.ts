@@ -388,10 +388,41 @@ const matchRetryIntervalRef = useRef<NodeJS.Timeout | null>(null);
         attachSessionListener(sessionRef.id, userId, onMatchRef.current);
 
         console.log(`[MATCH] Successfully matched!  Session: ${sessionRef.id}`);
+      // Stop retry interval since match succeeded
+if (matchRetryIntervalRef.current) {
+  clearInterval(matchRetryIntervalRef.current);
+  matchRetryIntervalRef.current = null;
+  console.log('[MATCH] Stopped retry interval - match successful');
+}
+matchedRef.current = true;
+setStatus('MATCHED');
       } catch (err: any) {
-        // If transaction failed due to race, don't block re-matching
-        console.warn('[MATCH] Match attempt failed, will retry', err);
-      }
+  console.warn('[MATCH] Match attempt failed', err);
+  
+  // If our queue entry is gone, we might have been matched by someone else
+  // Check if we have a session before retrying
+  const mySessions = await getDocs(
+    query(
+      collection(db, SESSIONS_COLLECTION),
+      where('participants', 'array-contains', userId),
+      where('started', '==', false),
+      limit(1)
+    )
+  );
+  
+  if (!mySessions.empty) {
+    console.log('[MATCH] Found existing session, attaching listener');
+    const sessionDoc = mySessions.docs[0];
+    attachSessionListener(sessionDoc.id, userId, onMatchRef.current);
+    
+    if (matchRetryIntervalRef.current) {
+      clearInterval(matchRetryIntervalRef.current);
+      matchRetryIntervalRef.current = null;
+    }
+    matchedRef.current = true;
+    setStatus('MATCHED');
+  }
+}
     },
     [attachSessionListener]
   );

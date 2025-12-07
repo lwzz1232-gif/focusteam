@@ -322,24 +322,25 @@ const startSessionListener = () => {
   );
 
   const unsubscribe = onSnapshot(q, (snapshot) => {
-    snapshot.docChanges().forEach((change) => {
-      if (change.type !== 'added') return;
+    snapshot.docs.forEach((doc) => { // <-- use all docs, not docChanges
       if (hasMatched.current) return;
 
-      const session = change.doc.data();
+      const session = doc.data();
       const partnerInfo = session.user1.id === user.id ? session.user2 : session.user1;
 
       // mark session as started safely
       (async () => {
         try {
-          const sessionRef = doc(db, 'sessions', change.doc.id);
-          await setDoc(sessionRef, { started: true }, { merge: true });
+          const sessionRef = doc(db, 'sessions', doc.id);
+          if (!session.started) {
+            await setDoc(sessionRef, { started: true }, { merge: true });
+          }
         } catch (e) {
           console.error("Failed to mark session as started:", e);
         }
       })();
 
-      console.log("[MATCH] Session detected!", change.doc.id);
+      console.log("[MATCH] Session detected!", doc.id);
 
       hasMatched.current = true;
       activeConfig.current = null;
@@ -365,6 +366,7 @@ const startSessionListener = () => {
 
   return unsubscribe;
 };
+
 
 
 const cleanUpStaleSessions = async () => {

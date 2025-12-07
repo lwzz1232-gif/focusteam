@@ -9,7 +9,7 @@ import { SessionRecap } from '../components/SessionRecap';
 import { useChat } from '../hooks/useChat'; 
 import { useWebRTC } from '../hooks/useWebRTC'; 
 import { db } from '../utils/firebaseConfig';
-import { collection, query, where, getDocs, updateDoc, doc, addDoc } from 'firebase/firestore';
+
 import { collection, query, where, getDocs, updateDoc, doc, addDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
 interface LiveSessionProps {
   user: User;

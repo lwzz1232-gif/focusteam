@@ -396,7 +396,22 @@ matchInProgressRef.current = true;
 
         console.log(`[MATCH] Successfully matched!  Session: ${sessionRef.id}`);
       // Stop retry interval since match succeeded
+try {
+  const sessions = collection(db, SESSIONS_COLLECTION);
+  const q = query(
+    sessions,
+    where('participants', 'array-contains', userId),
+    where('started', '==', true), // already started
+    orderBy('createdAt', 'desc'),
+    limit(1)
+  );
+  const snap = await getDocs(q);
 
+  if (!snap.empty) {
+    const sessionDoc = snap.docs[0];
+    console.log("[MATCH] Attaching listener to existing session:", sessionDoc.id);
+    attachSessionListener(sessionDoc.id, userId, onMatchRef.current);
+  }
       } catch (err: any) {
   // If transaction failed due to race, don't block re-matching
   console.warn('[MATCH] Match attempt failed, will retry', err);

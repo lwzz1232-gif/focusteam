@@ -226,25 +226,30 @@ export function useMatchmaking(user: User | null, onMatch?: (partner: Partner, s
             try {
               // Find partner info
               const participants: any[] = data.participants || [];
-              const partnerObj: Partner | undefined = participants
-                .find((p) => p.userId !== userId);
+    // In attachSessionListener, change:
+const partnerObj: Partner | undefined = participants
+  .find((p) => p.userId !== userId);
 
-              if (partnerObj) {
-                console.log(`[LISTENER] Found partner:`, partnerObj);
-                if (isMountedRef.current) {
-                  setStatus('MATCHED');
-                  if (localOnMatch) {
-                    localOnMatch(
-                      {
-                        id: partnerObj.userId,
-                        name: partnerObj.displayName || 'Partner',
-                        type: data.config?. type || 'ANY',
-                      } as Partner,
-                      snap.id
-                    );
-                  }
-                }
-              }
+// To:
+const partnerInfo = data.participantInfo || [];
+const partnerObj = partnerInfo.find((p: any) => p.userId !== userId);
+
+if (partnerObj) {
+  console.log(`[LISTENER] Found partner:`, partnerObj);
+  if (isMountedRef. current) {
+    setStatus('MATCHED');
+    if (localOnMatch) {
+      localOnMatch(
+        {
+          id: partnerObj.userId,
+          name: partnerObj.displayName || 'Partner',
+          type: data.config?. type || 'ANY',
+        } as Partner,
+        snap.id
+      );
+    }
+  }
+}
             } catch (err) {
               console.error('[LISTENER] onMatch error', err);
             }
@@ -347,25 +352,25 @@ export function useMatchmaking(user: User | null, onMatch?: (partner: Partner, s
           const myData = myQueueSnap.data() as any;
           const currentUser = myData.userDisplayName;
 
-          const sessionPayload = {
-            type: (config.type as SessionType) ??  'ANY',
-            config,
-            participants: [
-              {
-                userId: userId,
-                displayName: currentUser || 'User',
-                photoURL: myData.userPhotoURL ??  '',
-              },
-              {
-                userId: partnerId,
-                displayName: partnerData.userDisplayName ??  'Partner',
-                photoURL: partnerData.userPhotoURL ?? '',
-              },
-            ],
-            createdAt: serverTimestamp(),
-            started: false,
-          };
-
+       const sessionPayload = {
+  type: (config.type as SessionType) ??  'ANY',
+  config,
+  participants: [userId, partnerId], //  Just the IDs, not objects
+  participantInfo: [ //  Store full info separately
+    {
+      userId: userId,
+      displayName: currentUser || 'User',
+      photoURL: myData.userPhotoURL ??  '',
+    },
+    {
+      userId: partnerId,
+      displayName: partnerData.userDisplayName ?? 'Partner',
+      photoURL: partnerData.userPhotoURL ?? '',
+    },
+  ],
+  createdAt: serverTimestamp(),
+  started: false,
+};
           // All checks passed, create session and delete both queue entries atomically
           tx.set(sessionRef, sessionPayload);
           tx.delete(myQueueRef);

@@ -332,27 +332,29 @@ export function useMatchmaking(
         const queueColl = collection(db, QUEUE_COLLECTION);
         const sessionsColl = collection(db, SESSIONS_COLLECTION);
 
-        // Try to find a partner in queue that is not this user
+        // Get ALL queue entries and filter client-side to avoid index requirements
         const partnerQuery = query(
           queueColl,
-          where('userId', '!=', userId),
-          orderBy('createdAt', 'asc'),
-          limit(1)
+          orderBy('createdAt', 'asc')
         );
-        const partnerSnap = await getDocs(partnerQuery);
+        const allQueueSnap = await getDocs(partnerQuery);
+        
+        console.log(`[MATCH] Found ${allQueueSnap.size} total users in queue`);
 
-        if (partnerSnap.empty) {
+        // Filter out self and find first available partner
+        const partnerDoc = allQueueSnap.docs.find(doc => doc.id !== userId);
+        
+        if (!partnerDoc) {
           console.log(`[MATCH] No partner found in queue yet for user ${userId}`);
           matchInProgressRef.current = false;
           return;
         }
 
         // We have a candidate partner
-        const partnerDoc = partnerSnap.docs[0];
         const partnerData = partnerDoc.data() as any;
         const partnerId = partnerData.userId as string;
 
-        console.log(`[MATCH] Found potential partner: ${partnerId}`);
+        console.log(`[MATCH] Found potential partner: ${partnerId}, total in queue: ${allQueueSnap.size}`);
 
         // Run transaction: confirm both queue docs exist, create session, delete both queue docs
         const myQueueRef = doc(queueColl, userId);
@@ -482,7 +484,11 @@ export function useMatchmaking(
         };
 
         await setDoc(myQueueRef, queuePayload);
-        console.log(`[JOIN] Added user to queue: ${user.id}`);
+        console.log(`[JOIN] Added user to queue: ${user.id}, checking queue size...`);
+        
+        // Debug: Check how many users are in queue now
+        const queueCheck = await getDocs(collection(db, QUEUE_COLLECTION));
+        console.log(`[JOIN] Current queue size: ${queueCheck.size} users`);
 
         activeConfigRef.current = config;
         matchedRef.current = false;

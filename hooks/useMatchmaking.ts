@@ -22,10 +22,10 @@ import type { User, Partner, SessionConfig, SessionType } from '../types';
 const QUEUE_COLLECTION = 'queue';
 const SESSIONS_COLLECTION = 'sessions';
 
-// How old a non-started session must be before considered stale and removed (ms)
-const STALE_SESSION_MS = 45 * 1000;
+// How old a session must be before auto-cleanup (ms) - 5 minutes
+const SESSION_EXPIRATION_MS = 5 * 60 * 1000;
 
-// Polling interval to cleanup stale sessions (ms)
+// Polling interval to cleanup expired sessions (ms)
 const CLEANUP_INTERVAL_MS = 10 * 1000;
 
 // How long to wait before retrying a match (ms)
@@ -57,18 +57,18 @@ export function useMatchmaking(user: User | null, onMatch?: (partner: Partner, s
     onMatchRef.current = onMatch;
   }, [onMatch]);
 
-  // Cleanup on unmount
+  // Cleanup on unmount and mount
   useEffect(() => {
     isMountedRef.current = true;
 
     // Always run cleanup on mount once
     if (user) {
-      cleanupStaleSessions(). catch((e) => console.error('Initial cleanup error:', e));
+      cleanupExpiredSessions(). catch((e) => console.error('[STARTUP] Initial cleanup error:', e));
     }
 
     // Schedule periodic cleanup
     const cleanupId = setInterval(() => {
-      cleanupStaleSessions().catch((e) => console.error('Scheduled cleanup error:', e));
+      cleanupExpiredSessions().catch((e) => console.error('[CLEANUP] Scheduled cleanup error:', e));
     }, CLEANUP_INTERVAL_MS);
     cleanupIntervalRef.current = cleanupId;
 
@@ -77,7 +77,7 @@ export function useMatchmaking(user: User | null, onMatch?: (partner: Partner, s
 
       // Cleanup intervals
       if (cleanupIntervalRef.current) {
-        clearInterval(cleanupIntervalRef. current);
+        clearInterval(cleanupIntervalRef.current);
         cleanupIntervalRef.current = null;
       }
       if (matchRetryIntervalRef. current) {
@@ -93,57 +93,68 @@ export function useMatchmaking(user: User | null, onMatch?: (partner: Partner, s
 
       // Best-effort cleanup of pending things for this user
       if (user) {
-        forceCleanupUserPending(user.id).catch(() => {});
+        forceCleanupUserPending(user.id). catch(() => {});
       }
     };
   }, [user]);
 
-  // Utility: check for truly active sessions (started === true)
-  const hasActiveSession = useCallback(async (userId: string): Promise<boolean> => {
+  // Cleanup expired sessions (both started and not started)
+  const cleanupExpiredSessions = useCallback(async () => {
     try {
       const sessionsColl = collection(db, SESSIONS_COLLECTION);
+      const threshold = Timestamp.fromDate(new Date(Date.now() - SESSION_EXPIRATION_MS));
+      
+      // Delete ANY session older than threshold (regardless of started status)
       const q = query(
         sessionsColl,
-        where('participants', 'array-contains', userId),
-        where('started', '==', true),
-        limit(1)
-      );
-      const snap = await getDocs(q);
-      return ! snap.empty;
-    } catch (err: any) {
-      console.error('hasActiveSession error', err);
-      return false;
-    }
-  }, []);
-
-  // Cleanup stale sessions (started === false and older than threshold)
-  const cleanupStaleSessions = useCallback(async () => {
-    try {
-      const sessionsColl = collection(db, SESSIONS_COLLECTION);
-      const threshold = Timestamp.fromDate(new Date(Date.now() - STALE_SESSION_MS));
-      const q = query(
-        sessionsColl,
-        where('started', '==', false),
         where('createdAt', '<', threshold)
       );
       const snap = await getDocs(q);
 
       const deletes: Promise<void>[] = [];
-      snap. forEach((docSnap) => {
+      snap.forEach((docSnap) => {
         deletes.push(
           (async () => {
             try {
               await deleteDoc(doc(sessionsColl, docSnap.id));
-              console.log(`[CLEANUP] Deleted stale session: ${docSnap.id}`);
+              console.log(`[CLEANUP] Deleted expired session: ${docSnap.id}`);
             } catch (err) {
-              console.warn(`[CLEANUP] Failed to delete stale session ${docSnap.id}`, err);
+              console.warn(`[CLEANUP] Failed to delete expired session ${docSnap.id}`, err);
             }
           })()
         );
       });
       await Promise.all(deletes);
     } catch (err) {
-      console.error('[CLEANUP] cleanupStaleSessions error', err);
+      console.error('[CLEANUP] cleanupExpiredSessions error', err);
+    }
+  }, []);
+
+  // Check if user has an ACTIVELY ONGOING session (started within last 5 minutes)
+  const hasActiveSession = useCallback(async (userId: string): Promise<boolean> => {
+    try {
+      const sessionsColl = collection(db, SESSIONS_COLLECTION);
+      // Only consider sessions that started AND are not expired
+      const recentThreshold = Timestamp.fromDate(new Date(Date.now() - SESSION_EXPIRATION_MS));
+      
+      const q = query(
+        sessionsColl,
+        where('participants', 'array-contains', userId),
+        where('started', '==', true),
+        where('createdAt', '>', recentThreshold),
+        limit(1)
+      );
+      const snap = await getDocs(q);
+      
+      if (! snap.empty) {
+        console.warn(`[ACTIVE-CHECK] User ${userId} has active session: ${snap.docs[0].id}`);
+        return true;
+      }
+      
+      return false;
+    } catch (err: any) {
+      console.error('[ACTIVE-CHECK] hasActiveSession error', err);
+      return false;
     }
   }, []);
 
@@ -237,7 +248,7 @@ export function useMatchmaking(user: User | null, onMatch?: (partner: Partner, s
                       {
                         id: partnerInfo.userId,
                         name: partnerInfo.displayName || 'Partner',
-                        type: data. config?.type || 'ANY',
+                        type: data.config?. type || 'ANY',
                       } as Partner,
                       snap.id
                     );
@@ -272,16 +283,15 @@ export function useMatchmaking(user: User | null, onMatch?: (partner: Partner, s
                   tx.update(sRef, { started: true });
                   console.log('[TRANSACTION] Marked session as started');
                 });
-                // After transaction completes, onSnapshot will receive started === true and call onMatch
               } catch (err) {
-                console.warn('[TRANSACTION] Failed to mark session started', err);
+                console. warn('[TRANSACTION] Failed to mark session started', err);
               }
             })();
           }
         },
         (error) => {
-          console. error('[LISTENER] onSnapshot error', error);
-          if (isMountedRef.current) {
+          console.error('[LISTENER] onSnapshot error', error);
+          if (isMountedRef. current) {
             setError(`Session listener error: ${error.message}`);
           }
         }
@@ -349,8 +359,8 @@ export function useMatchmaking(user: User | null, onMatch?: (partner: Partner, s
           const sessionPayload = {
             type: (config.type as SessionType) ??  'ANY',
             config,
-            participants: [userId, partnerId], // ✅ Just the IDs for Firestore rules
-            participantInfo: [ // ✅ Full info stored separately
+            participants: [userId, partnerId], // Just the IDs for Firestore rules
+            participantInfo: [ // Full info stored separately
               {
                 userId: userId,
                 displayName: currentUserName || 'User',
@@ -394,7 +404,7 @@ export function useMatchmaking(user: User | null, onMatch?: (partner: Partner, s
         return;
       }
 
-      if (!isMountedRef.current) {
+      if (! isMountedRef.current) {
         console.warn('[JOIN] Component not mounted, aborting joinQueue');
         return;
       }
@@ -405,10 +415,10 @@ export function useMatchmaking(user: User | null, onMatch?: (partner: Partner, s
       try {
         console.log(`[JOIN] Starting matchmaking for user: ${user.id}`);
 
-        // Check if user already has a truly active session
+        // Check if user already has a TRULY active session
         const hasActive = await hasActiveSession(user. id);
         if (hasActive) {
-          setError("You're already in an active session!");
+          setError("You're already in an active session!  Please wait for it to expire or complete it first.");
           setStatus('IDLE');
           console.warn('[JOIN] User already has active session');
           return;

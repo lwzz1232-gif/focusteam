@@ -142,18 +142,30 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
 
     try {
       console.log("[MATCH] Attempting to find match...");
+      console.log("[MATCH] Config:", { type: config.type, duration: config.duration });
 
-      // Use transaction to prevent race conditions
+      // Query for compatible partners (NOT in transaction - getDocs can't be in transaction)
+      const q = query(
+        collection(db, 'queue'),
+        where('type', '==', config.type),
+        where('duration', '==', config.duration),
+        where('status', '==', 'waiting')
+      );
+
+      let snapshot;
+      try {
+        snapshot = await getDocs(q);
+        console.log("[MATCH] Query successful");
+      } catch (queryError: any) {
+        console.error("[MATCH] Query failed:", queryError);
+        if (queryError.code === 'failed-precondition') {
+          throw new Error('Missing Firestore index. Please create an index for queue collection with fields: type, duration, status, timestamp');
+        }
+        throw queryError;
+      }
+
+      // Use transaction only for the write operations
       await runTransaction(db, async (transaction) => {
-        // Query for compatible partners
-        const q = query(
-          collection(db, 'queue'),
-          where('type', '==', config.type),
-          where('duration', '==', config.duration),
-          where('status', '==', 'waiting')
-        );
-
-        const snapshot = await getDocs(q);
         
         console.log(`[MATCH] Found ${snapshot.size} users in queue`);
 
@@ -201,7 +213,7 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
         
         console.log("[MATCH] Attempting to match with:", partnerData.name);
 
-        // Double-check both users still exist in queue within transaction
+        // Transaction writes start here
         const myDocRef = doc(db, 'queue', user.id);
         const partnerDocRef = doc(db, 'queue', partnerData.userId);
         
@@ -215,31 +227,6 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
         
         if (!partnerDoc.exists()) {
           console.log("[MATCH] Partner no longer in queue");
-          return;
-        }
-
-        // Check if either user is already in a session
-        const mySessionCheck = query(
-          collection(db, 'sessions'),
-          where('participants', 'array-contains', user.id),
-          where('status', '==', 'active')
-        );
-        const mySessions = await getDocs(mySessionCheck);
-        
-        if (!mySessions.empty) {
-          console.log("[MATCH] I'm already in session");
-          return;
-        }
-
-        const partnerSessionCheck = query(
-          collection(db, 'sessions'),
-          where('participants', 'array-contains', partnerData.userId),
-          where('status', '==', 'active')
-        );
-        const partnerSessions = await getDocs(partnerSessionCheck);
-        
-        if (!partnerSessions.empty) {
-          console.log("[MATCH] Partner already in session");
           return;
         }
 
@@ -267,10 +254,15 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
       
     } catch (e: any) {
       console.error("[MATCH] Error in attemptMatch:", e);
+      console.error("[MATCH] Error code:", e.code);
+      console.error("[MATCH] Error message:", e.message);
       
-      if (e.code === 'failed-precondition' || e.toString().includes('index')) {
-        console.error("[INDEX] Missing Firestore Index!");
-        setError(`Missing Firestore Index. Please create the required index in Firebase Console for collection 'queue' with fields: type, duration, status, timestamp`);
+      if (e.code === 'permission-denied') {
+        setError('Permission denied. Please check Firestore security rules.');
+        activeConfig.current = null;
+        hasMatched.current = true;
+      } else if (e.code === 'failed-precondition' || e.message?.includes('index')) {
+        setError('Missing Firestore Index. Please create an index for the queue collection.');
         activeConfig.current = null;
         hasMatched.current = true;
       }

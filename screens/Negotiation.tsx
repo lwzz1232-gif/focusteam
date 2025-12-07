@@ -103,14 +103,14 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, onNeg
     }
   }, [step]);
 
-  useEffect(() => {
-    if (step === 'AGREED' && finalConfig) {
-     const timer = setTimeout(() => {
-  setStep('AGREED');
-}, 5000); // Show review for 5s
-      return () => clearTimeout(timer);
-    }
-  }, [step, finalConfig, onNegotiationComplete]);
+useEffect(() => {
+  if (step === 'AGREED' && finalConfig) {
+    const timer = setTimeout(() => {
+      onNegotiationComplete(finalConfig);
+    }, 3000); // Changed from 5000 to match the UI text "3 seconds"
+    return () => clearTimeout(timer);
+  }
+}, [step, finalConfig, onNegotiationComplete]);
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-6 max-w-4xl mx-auto w-full">

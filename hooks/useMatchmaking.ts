@@ -45,7 +45,7 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
       return;
     }
     
-    console.log("🚀 [MATCH] Starting matchmaking for:", user.name);
+    console.log("[MATCH] Starting matchmaking for:", user.name);
     
     // Check if already in a session
     try {
@@ -83,7 +83,7 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
         status: 'waiting'
       });
 
-      console.log("✅ [MATCH] Successfully joined queue");
+      console.log("[MATCH] Successfully joined queue");
 
       // Start listening for matches immediately
       startSessionListener();
@@ -102,7 +102,7 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
       }, 2000); // Check every 2 seconds
 
     } catch (error: any) {
-      console.error("❌ [MATCH] Queue Join Error:", error);
+      console.error("[MATCH] Queue Join Error:", error);
       setError(error.message);
       setStatus('IDLE');
       activeConfig.current = null;
@@ -112,7 +112,7 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
   const cancelSearch = async () => {
     if (!user) return;
     
-    console.log("🛑 [MATCH] Cancelling search");
+    console.log("[MATCH] Cancelling search");
     
     try {
       activeConfig.current = null;
@@ -140,7 +140,7 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
     }
 
     try {
-      console.log("🔍 [MATCH] Attempting to find match...");
+      console.log("[MATCH] Attempting to find match...");
 
       // Query for compatible partners
       const q = query(
@@ -152,7 +152,7 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
 
       const snapshot = await getDocs(q);
       
-      console.log(`📊 [MATCH] Found ${snapshot.size} users in queue`);
+      console.log(`[MATCH] Found ${snapshot.size} users in queue`);
 
       const now = Date.now();
       const validPartners = snapshot.docs.filter(d => {
@@ -179,10 +179,10 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
         return true;
       });
 
-      console.log(`✅ [MATCH] ${validPartners.length} valid partners found`);
+      console.log(`[MATCH] ${validPartners.length} valid partners found`);
 
       if (validPartners.length === 0) {
-        console.log("⏳ [MATCH] No partners available, waiting...");
+        console.log("[MATCH] No partners available, waiting...");
         return;
       }
 
@@ -196,7 +196,7 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
       const potentialMatch = validPartners[0];
       const partnerData = potentialMatch.data();
       
-      console.log("🎯 [MATCH] Attempting to match with:", partnerData.name);
+      console.log("[MATCH] Attempting to match with:", partnerData.name);
 
       // Double-check both users still exist in queue
       const [myDoc, partnerDoc] = await Promise.all([
@@ -205,12 +205,12 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
       ]);
       
       if (!myDoc.exists()) {
-        console.log("❌ [MATCH] I'm no longer in queue");
+        console.log("[MATCH] I'm no longer in queue");
         return;
       }
       
       if (!partnerDoc.exists()) {
-        console.log("❌ [MATCH] Partner no longer in queue");
+        console.log("[MATCH] Partner no longer in queue");
         return;
       }
 
@@ -223,7 +223,7 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
       const partnerSessions = await getDocs(partnerSessionCheck);
       
       if (!partnerSessions.empty) {
-        console.log("❌ [MATCH] Partner already in session");
+        console.log("[MATCH] Partner already in session");
         return;
       }
 
@@ -236,11 +236,11 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
       const mySessions = await getDocs(mySessionCheck);
       
       if (!mySessions.empty) {
-        console.log("❌ [MATCH] I'm already in session");
+        console.log("[MATCH] I'm already in session");
         return;
       }
 
-      console.log("💾 [MATCH] Creating session...");
+      console.log("[MATCH] Creating session...");
 
       // Create match atomically
       const batch = writeBatch(db);
@@ -262,13 +262,13 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
       
       hasMatched.current = true;
       
-      console.log("🎉 [MATCH] Match created! Session ID:", newSessionRef.id);
+      console.log("[MATCH] Match created! Session ID:", newSessionRef.id);
       
     } catch (e: any) {
-      console.error("❌ [MATCH] Error in attemptMatch:", e);
+      console.error("[MATCH] Error in attemptMatch:", e);
       
       if (e.code === 'failed-precondition' || e.toString().includes('index')) {
-        console.error("🔗 [INDEX] Missing Firestore Index!");
+        console.error("[INDEX] Missing Firestore Index!");
         setError(`Missing Firestore Index. Please create the required index in Firebase Console.`);
         activeConfig.current = null;
         hasMatched.current = true; // Stop trying
@@ -290,7 +290,7 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
         if (change.type === 'added' && !hasMatched.current) {
           const session = change.doc.data();
           
-          console.log("🎊 [MATCH] Session detected!", change.doc.id);
+          console.log("[MATCH] Session detected!", change.doc.id);
           
           const partnerInfo = session.user1.id === user.id ? session.user2 : session.user1;
           

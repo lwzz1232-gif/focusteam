@@ -48,22 +48,33 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
     
     console.log("[MATCH] Starting matchmaking for:", user.name);
     
-    // Check if already in a session
-    try {
-      const existingSessionQuery = query(
-        collection(db, 'sessions'),
-        where('participants', 'array-contains', user.id),
-        where('status', '==', 'active')
-      );
-      const existingSessions = await getDocs(existingSessionQuery);
-      
-      if (!existingSessions.empty) {
-        setError("You're already in an active session!");
-        return;
+// Check if already in a session and handle stale sessions
+try {
+  const existingSessionQuery = query(
+    collection(db, 'sessions'),
+    where('participants', 'array-contains', user.id),
+    where('status', '==', 'active')
+  );
+  const existingSessions = await getDocs(existingSessionQuery);
+
+  if (!existingSessions.empty) {
+    // End any expired sessions
+    existingSessions.forEach(async (docSnap) => {
+      const data = docSnap.data();
+      const createdAt = (data.createdAt as Timestamp)?.toMillis() || 0;
+
+      if (Date.now() - createdAt > config.duration * 60 * 1000) {
+        await setDoc(doc(db, 'sessions', docSnap.id), { status: 'ended' }, { merge: true });
       }
-    } catch (e) {
-      console.error("Error checking existing sessions:", e);
-    }
+    });
+
+    setError("You're already in an active session!");
+    return;
+  }
+} catch (e) {
+  console.error("Error checking existing sessions:", e);
+}
+
     
     setStatus('SEARCHING');
     setError(null);
@@ -125,6 +136,9 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
       }
       
       await deleteDoc(doc(db, 'queue', user.id));
+
+  // ✅ Add this line to clear any partial session
+    await quitSession();
       
       if (isMounted.current) {
         setStatus('IDLE');
@@ -134,6 +148,33 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
       console.error("Cancel Error", e); 
     }
   };
+const quitSession = async (sessionId?: string) => {
+  if (!user) return;
+
+  try {
+    if (sessionId) {
+      const sessionRef = doc(db, 'sessions', sessionId);
+      const sessionSnap = await getDoc(sessionRef);
+      if (sessionSnap.exists()) {
+        await setDoc(sessionRef, { status: 'ended' }, { merge: true });
+      }
+    }
+
+    await deleteDoc(doc(db, 'queue', user.id)).catch(() => {});
+
+    hasMatched.current = false;
+    activeConfig.current = null;
+    setStatus('IDLE');
+    setError(null);
+
+    if (matchCheckInterval.current) {
+      clearInterval(matchCheckInterval.current);
+      matchCheckInterval.current = null;
+    }
+  } catch (e) {
+    console.error("Quit session error:", e);
+  }
+};
 
   const attemptMatch = async (config: SessionConfig) => {
     if (!user || !activeConfig.current || hasMatched.current) {
@@ -269,49 +310,49 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
     }
   };
 
-  const startSessionListener = () => {
-    if (!user) return;
+ const startSessionListener = () => {
+  if (!user) return;
 
-    const q = query(
-      collection(db, 'sessions'),
-      where('participants', 'array-contains', user.id),
-      where('status', '==', 'active')
-    );
+  const q = query(
+    collection(db, 'sessions'),
+    where('participants', 'array-contains', user.id),
+    where('status', '==', 'active')
+  );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === 'added' && !hasMatched.current) {
-          const session = change.doc.data();
-          
-          console.log("[MATCH] Session detected!", change.doc.id);
-          
-          const partnerInfo = session.user1.id === user.id ? session.user2 : session.user1;
-          
-          hasMatched.current = true;
-          activeConfig.current = null;
-          
-          if (matchCheckInterval.current) {
-            clearInterval(matchCheckInterval.current);
-            matchCheckInterval.current = null;
-          }
-          
-          if (isMounted.current) {
-            setStatus('MATCHED');
-            
-            onMatch({
-              id: partnerInfo.id,
-              name: partnerInfo.name,
-              type: SessionType.ANY
-            });
-          }
-        }
-      });
-    }, (error) => {
-      console.error("Session listener error:", error);
+  const unsubscribe = onSnapshot(q, (snapshot) => {
+    snapshot.docs.forEach((doc) => {
+      const session = doc.data();
+
+      // Skip if already matched locally
+      if (hasMatched.current) return;
+
+      const partnerInfo = session.user1.id === user.id ? session.user2 : session.user1;
+
+      console.log("[MATCH] Session detected!", doc.id);
+
+      hasMatched.current = true;
+      activeConfig.current = null;
+
+      if (matchCheckInterval.current) {
+        clearInterval(matchCheckInterval.current);
+        matchCheckInterval.current = null;
+      }
+
+      if (isMounted.current) {
+        setStatus('MATCHED');
+
+        onMatch({
+          id: partnerInfo.id,
+          name: partnerInfo.name,
+          type: session.config.type
+        });
+      }
     });
+  }, (error) => console.error("Session listener error:", error));
 
-    return unsubscribe;
-  };
+  return unsubscribe;
+};
+
 
   return { status, joinQueue, cancelSearch, error };
 };

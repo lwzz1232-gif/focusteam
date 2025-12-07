@@ -46,7 +46,7 @@ export function useMatchmaking(user: User | null, onMatch?: (partner: Partner, s
   const onMatchRef = useRef<((partner: Partner, sessionId: string) => void) | undefined>(onMatch);
   const sessionListenerUnsubRef = useRef<(() => void) | null>(null);
   const cleanupIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const matchRetryIntervalRef = useRef<NodeJS. Timeout | null>(null);
+const matchRetryIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const matchedRef = useRef<boolean>(false);
   const isMountedRef = useRef<boolean>(true);
   const currentSessionIdRef = useRef<string | null>(null);

@@ -19,7 +19,7 @@ import {
 import { db } from '../utils/firebaseConfig';
 import type { User, Partner, SessionConfig, SessionType } from '../types';
 
-const QUEUE_COLLECTION = 'matchmakingQueue';
+const QUEUE_COLLECTION = 'queue';
 const SESSIONS_COLLECTION = 'sessions';
 
 // How old a non-started session must be before considered stale and removed (ms)
@@ -77,11 +77,11 @@ export function useMatchmaking(user: User | null, onMatch?: (partner: Partner, s
 
       // Cleanup intervals
       if (cleanupIntervalRef.current) {
-        clearInterval(cleanupIntervalRef.current);
+        clearInterval(cleanupIntervalRef. current);
         cleanupIntervalRef.current = null;
       }
-      if (matchRetryIntervalRef.current) {
-        clearInterval(matchRetryIntervalRef. current);
+      if (matchRetryIntervalRef. current) {
+        clearInterval(matchRetryIntervalRef.current);
         matchRetryIntervalRef.current = null;
       }
 
@@ -129,7 +129,7 @@ export function useMatchmaking(user: User | null, onMatch?: (partner: Partner, s
       const snap = await getDocs(q);
 
       const deletes: Promise<void>[] = [];
-      snap.forEach((docSnap) => {
+      snap. forEach((docSnap) => {
         deletes.push(
           (async () => {
             try {
@@ -224,32 +224,26 @@ export function useMatchmaking(user: User | null, onMatch?: (partner: Partner, s
             }
 
             try {
-              // Find partner info
-              const participants: any[] = data.participants || [];
-    // In attachSessionListener, change:
-const partnerObj: Partner | undefined = participants
-  .find((p) => p.userId !== userId);
+              // Find partner info from participantInfo array
+              const participantInfo: any[] = data.participantInfo || [];
+              const partnerInfo = participantInfo.find((p: any) => p.userId !== userId);
 
-// To:
-const partnerInfo = data.participantInfo || [];
-const partnerObj = partnerInfo.find((p: any) => p.userId !== userId);
-
-if (partnerObj) {
-  console.log(`[LISTENER] Found partner:`, partnerObj);
-  if (isMountedRef. current) {
-    setStatus('MATCHED');
-    if (localOnMatch) {
-      localOnMatch(
-        {
-          id: partnerObj.userId,
-          name: partnerObj.displayName || 'Partner',
-          type: data.config?. type || 'ANY',
-        } as Partner,
-        snap.id
-      );
-    }
-  }
-}
+              if (partnerInfo) {
+                console.log(`[LISTENER] Found partner:`, partnerInfo);
+                if (isMountedRef.current) {
+                  setStatus('MATCHED');
+                  if (localOnMatch) {
+                    localOnMatch(
+                      {
+                        id: partnerInfo.userId,
+                        name: partnerInfo.displayName || 'Partner',
+                        type: data. config?.type || 'ANY',
+                      } as Partner,
+                      snap.id
+                    );
+                  }
+                }
+              }
             } catch (err) {
               console.error('[LISTENER] onMatch error', err);
             }
@@ -270,13 +264,13 @@ if (partnerObj) {
                     return;
                   }
                   const sData: any = sSnap.data();
-                  if (sData. started === true) {
+                  if (sData.started === true) {
                     console.log('[TRANSACTION] Session already started');
                     return;
                   }
                   // Mark started
                   tx.update(sRef, { started: true });
-                  console. log('[TRANSACTION] Marked session as started');
+                  console.log('[TRANSACTION] Marked session as started');
                 });
                 // After transaction completes, onSnapshot will receive started === true and call onMatch
               } catch (err) {
@@ -286,7 +280,7 @@ if (partnerObj) {
           }
         },
         (error) => {
-          console.error('[LISTENER] onSnapshot error', error);
+          console. error('[LISTENER] onSnapshot error', error);
           if (isMountedRef.current) {
             setError(`Session listener error: ${error.message}`);
           }
@@ -308,7 +302,7 @@ if (partnerObj) {
         const queueColl = collection(db, QUEUE_COLLECTION);
         const sessionsColl = collection(db, SESSIONS_COLLECTION);
 
-        // Try to find a partner in queue that is not this user and matches config. 
+        // Try to find a partner in queue that is not this user
         const partnerQuery = query(
           queueColl,
           where('userId', '!=', userId),
@@ -317,7 +311,7 @@ if (partnerObj) {
         );
         const partnerSnap = await getDocs(partnerQuery);
 
-        if (partnerSnap. empty) {
+        if (partnerSnap.empty) {
           console.log(`[MATCH] No partner found in queue yet for user ${userId}`);
           return;
         }
@@ -335,7 +329,7 @@ if (partnerObj) {
         const sessionRef = doc(sessionsColl); // Auto-generated ID
 
         await runTransaction(db, async (tx) => {
-          const myQueueSnap = await tx. get(myQueueRef);
+          const myQueueSnap = await tx.get(myQueueRef);
           const partnerQueueSnap = await tx.get(partnerQueueRef);
 
           // If partner or me is gone, abort the transaction
@@ -350,27 +344,28 @@ if (partnerObj) {
           }
 
           const myData = myQueueSnap.data() as any;
-          const currentUser = myData.userDisplayName;
+          const currentUserName = myData.userDisplayName;
 
-       const sessionPayload = {
-  type: (config.type as SessionType) ??  'ANY',
-  config,
-  participants: [userId, partnerId], //  Just the IDs, not objects
-  participantInfo: [ //  Store full info separately
-    {
-      userId: userId,
-      displayName: currentUser || 'User',
-      photoURL: myData.userPhotoURL ??  '',
-    },
-    {
-      userId: partnerId,
-      displayName: partnerData.userDisplayName ?? 'Partner',
-      photoURL: partnerData.userPhotoURL ?? '',
-    },
-  ],
-  createdAt: serverTimestamp(),
-  started: false,
-};
+          const sessionPayload = {
+            type: (config.type as SessionType) ??  'ANY',
+            config,
+            participants: [userId, partnerId], // ✅ Just the IDs for Firestore rules
+            participantInfo: [ // ✅ Full info stored separately
+              {
+                userId: userId,
+                displayName: currentUserName || 'User',
+                photoURL: myData.userPhotoURL ??  '',
+              },
+              {
+                userId: partnerId,
+                displayName: partnerData.userDisplayName ??  'Partner',
+                photoURL: partnerData.userPhotoURL ?? '',
+              },
+            ],
+            createdAt: serverTimestamp(),
+            started: false,
+          };
+
           // All checks passed, create session and delete both queue entries atomically
           tx.set(sessionRef, sessionPayload);
           tx.delete(myQueueRef);
@@ -399,7 +394,7 @@ if (partnerObj) {
         return;
       }
 
-      if (! isMountedRef.current) {
+      if (!isMountedRef.current) {
         console.warn('[JOIN] Component not mounted, aborting joinQueue');
         return;
       }
@@ -443,7 +438,7 @@ if (partnerObj) {
         await attemptMatch(user.id, config);
 
         // Set up periodic matching retry in case first attempt didn't find anyone
-        if (matchRetryIntervalRef. current) {
+        if (matchRetryIntervalRef.current) {
           clearInterval(matchRetryIntervalRef.current);
         }
 

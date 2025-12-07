@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../utils/firebaseConfig';
-import { collection, query, orderBy, getDocs, updateDoc, doc, limit, where, startAfter, DocumentData, QueryDocumentSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, getDocs, updateDoc, doc, limit, where, startAfter, DocumentData, QueryDocumentSnapshot, writeBatch } from 'firebase/firestore';
 import { Report, SessionLog, ChatMessage, User, BanHistoryLog } from '../types';
 import { Button } from '../components/Button';
 import { Shield, AlertTriangle, UserX, UserCheck, History, XCircle, CheckCircle, ArrowLeft, X, FileText, Download, Users, Radio, Activity, Zap, Search, ChevronDown, ArrowRight } from 'lucide-react';
-import { collection, query, orderBy, getDocs, updateDoc, doc, limit, where, startAfter, DocumentData, QueryDocumentSnapshot, writeBatch } from 'firebase/firestore';
 interface AdminProps {
   onBack: () => void;
 }

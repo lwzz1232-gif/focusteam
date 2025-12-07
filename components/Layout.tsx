@@ -4,7 +4,8 @@ import { User, Screen, Notification } from '../types';
 import { LogOut, ShieldAlert, Instagram, Facebook, Music2, Bell } from 'lucide-react';
 import { Logo } from './Logo';
 import { getNotifications, markNotificationRead } from '../services/mockBackend';
-
+import { updateDoc } from 'firebase/firestore';
+import { deleteDoc } from 'firebase/firestore';
 interface LayoutProps {
   children: React.ReactNode;
   user: User | null;
@@ -28,7 +29,19 @@ useEffect(() => {
     if (user) {
         const fetchNotes = async () => {
             const notes = await getNotifications(user.id);
-            setNotifications(notes);
+            
+            // Filter out notifications that should be deleted
+            const now = Date.now();
+            const validNotes = notes.filter(n => {
+                if (n.read && (n as any).deleteAt && (n as any).deleteAt < now) {
+                    // Delete from Firestore
+                    deleteDoc(doc(db, 'users', user.id, 'notifications', n.id)).catch(console.error);
+                    return false;
+                }
+                return true;
+            });
+            
+            setNotifications(validNotes);
         };
         fetchNotes();
         const interval = setInterval(fetchNotes, 3000);
@@ -36,10 +49,26 @@ useEffect(() => {
     }
 }, [user]);
 
-  const handleNotificationClick = (id: string) => {
-      if (user) markNotificationRead(user.id, id);
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
-  };
+  const handleNotificationClick = async (id: string) => {
+    if (!user) return;
+    
+    // Mark as read and set deletion timer
+    const readAt = Date.now();
+    const deleteAt = readAt + (12 * 60 * 60 * 1000); // 12 hours
+    
+    await updateDoc(doc(db, 'users', user.id, 'notifications', id), {
+        read: true,
+        readAt: readAt,
+        deleteAt: deleteAt
+    });
+    
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    
+    // Schedule local removal after 12h
+    setTimeout(() => {
+        setNotifications(prev => prev.filter(n => n.id !== id));
+    }, 12 * 60 * 60 * 1000);
+};
 
   const getGreeting = () => {
       if (!user) return "";

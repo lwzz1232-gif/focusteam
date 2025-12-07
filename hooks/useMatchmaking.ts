@@ -16,252 +16,304 @@ import {
   Timestamp,
   updateDoc,
 } from 'firebase/firestore';
+import { db } from '../utils/firebaseConfig';
 import type { User, Partner, SessionConfig, SessionType } from '../types';
 
 const QUEUE_COLLECTION = 'matchmakingQueue';
 const SESSIONS_COLLECTION = 'sessions';
 
 // How old a non-started session must be before considered stale and removed (ms)
-const STALE_SESSION_MS = 30 * 1000;
+const STALE_SESSION_MS = 45 * 1000;
 
 // Polling interval to cleanup stale sessions (ms)
-const CLEANUP_INTERVAL_MS = 15 * 1000;
+const CLEANUP_INTERVAL_MS = 10 * 1000;
+
+// How long to wait before retrying a match (ms)
+const MATCH_RETRY_INTERVAL_MS = 2000;
 
 type UseMatchmakingReturn = {
-  startSearch: (config: SessionConfig, onMatch?: (partner: Partner, sessionId: string) => void) => Promise<void>;
+  status: 'IDLE' | 'SEARCHING' | 'MATCHED';
+  joinQueue: (config: SessionConfig) => Promise<void>;
   cancelSearch: () => Promise<void>;
-  isSearching: boolean;
-  lastError?: string;
+  error?: string;
 };
 
-export function useMatchmaking(user: User): UseMatchmakingReturn {
-  const db = getFirestore();
-  const queueColl = collection(db, QUEUE_COLLECTION);
-  const sessionsColl = collection(db, SESSIONS_COLLECTION);
-
-  const [isSearching, setIsSearching] = useState(false);
-  const [lastError, setLastError] = useState<string | undefined>(undefined);
+export function useMatchmaking(user: User | null, onMatch?: (partner: Partner, sessionId: string) => void): UseMatchmakingReturn {
+  const [status, setStatus] = useState<'IDLE' | 'SEARCHING' | 'MATCHED'>('IDLE');
+  const [error, setError] = useState<string | undefined>(undefined);
 
   // Keep refs for cleanup and ensuring callbacks run once
-  const onMatchRef = useRef<((partner: Partner, sessionId: string) => void) | undefined>(undefined);
+  const onMatchRef = useRef<((partner: Partner, sessionId: string) => void) | undefined>(onMatch);
   const sessionListenerUnsubRef = useRef<(() => void) | null>(null);
-  const cleanupIntervalRef = useRef<number | null>(null);
+  const cleanupIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const matchRetryIntervalRef = useRef<NodeJS. Timeout | null>(null);
   const matchedRef = useRef<boolean>(false);
+  const isMountedRef = useRef<boolean>(true);
+  const currentSessionIdRef = useRef<string | null>(null);
+  const activeConfigRef = useRef<SessionConfig | null>(null);
 
-  // Helper doc refs
-  const userQueueDocRef = (uid = user.id) => doc(queueColl, uid);
-  const sessionDocRef = (sessionId?: string) => (sessionId ? doc(sessionsColl, sessionId) : doc(sessionsColl));
+  // Update callback ref when onMatch changes
+  useEffect(() => {
+    onMatchRef.current = onMatch;
+  }, [onMatch]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    isMountedRef.current = true;
+
+    // Always run cleanup on mount once
+    if (user) {
+      cleanupStaleSessions(). catch((e) => console.error('Initial cleanup error:', e));
+    }
+
+    // Schedule periodic cleanup
+    const cleanupId = setInterval(() => {
+      cleanupStaleSessions().catch((e) => console.error('Scheduled cleanup error:', e));
+    }, CLEANUP_INTERVAL_MS);
+    cleanupIntervalRef.current = cleanupId;
+
+    return () => {
+      isMountedRef.current = false;
+
+      // Cleanup intervals
+      if (cleanupIntervalRef.current) {
+        clearInterval(cleanupIntervalRef.current);
+        cleanupIntervalRef.current = null;
+      }
+      if (matchRetryIntervalRef.current) {
+        clearInterval(matchRetryIntervalRef. current);
+        matchRetryIntervalRef.current = null;
+      }
+
+      // Detach session listener
+      if (sessionListenerUnsubRef.current) {
+        sessionListenerUnsubRef. current();
+        sessionListenerUnsubRef.current = null;
+      }
+
+      // Best-effort cleanup of pending things for this user
+      if (user) {
+        forceCleanupUserPending(user.id).catch(() => {});
+      }
+    };
+  }, [user]);
 
   // Utility: check for truly active sessions (started === true)
-  const hasActiveSession = useCallback(async (): Promise<boolean> => {
+  const hasActiveSession = useCallback(async (userId: string): Promise<boolean> => {
     try {
+      const sessionsColl = collection(db, SESSIONS_COLLECTION);
       const q = query(
         sessionsColl,
-        where('participants', 'array-contains', user.id),
+        where('participants', 'array-contains', userId),
         where('started', '==', true),
         limit(1)
       );
       const snap = await getDocs(q);
-      return !snap.empty;
+      return ! snap.empty;
     } catch (err: any) {
       console.error('hasActiveSession error', err);
       return false;
     }
-  }, [sessionsColl, user.id]);
+  }, []);
 
   // Cleanup stale sessions (started === false and older than threshold)
   const cleanupStaleSessions = useCallback(async () => {
     try {
+      const sessionsColl = collection(db, SESSIONS_COLLECTION);
       const threshold = Timestamp.fromDate(new Date(Date.now() - STALE_SESSION_MS));
-      const q = query(sessionsColl, where('started', '==', false), where('createdAt', '<', threshold));
+      const q = query(
+        sessionsColl,
+        where('started', '==', false),
+        where('createdAt', '<', threshold)
+      );
       const snap = await getDocs(q);
+
       const deletes: Promise<void>[] = [];
       snap.forEach((docSnap) => {
         deletes.push(
           (async () => {
             try {
               await deleteDoc(doc(sessionsColl, docSnap.id));
+              console.log(`[CLEANUP] Deleted stale session: ${docSnap.id}`);
             } catch (err) {
-              console.warn('Failed to delete stale session', docSnap.id, err);
+              console.warn(`[CLEANUP] Failed to delete stale session ${docSnap.id}`, err);
             }
           })()
         );
       });
       await Promise.all(deletes);
     } catch (err) {
-      console.error('cleanupStaleSessions error', err);
+      console.error('[CLEANUP] cleanupStaleSessions error', err);
     }
-  }, [sessionsColl]);
+  }, []);
 
   // Clear any queue doc for this user and any non-started session where the user participates
-  const forceCleanupUserPending = useCallback(async () => {
+  const forceCleanupUserPending = useCallback(async (userId: string) => {
     try {
-      // remove queue doc
+      const queueColl = collection(db, QUEUE_COLLECTION);
+      const sessionsColl = collection(db, SESSIONS_COLLECTION);
+
+      // Remove queue doc
       try {
-        await deleteDoc(userQueueDocRef());
+        await deleteDoc(doc(queueColl, userId));
+        console.log(`[CLEANUP] Deleted queue entry for user: ${userId}`);
       } catch (e) {
-        // ignore
+        // Ignore if doesn't exist
       }
 
-      // remove any sessions where this user participates and started === false
-      const q = query(sessionsColl, where('participants', 'array-contains', user.id), where('started', '==', false));
+      // Remove any sessions where this user participates and started === false
+      const q = query(
+        sessionsColl,
+        where('participants', 'array-contains', userId),
+        where('started', '==', false)
+      );
       const snap = await getDocs(q);
       const deletes: Promise<void>[] = [];
-      snap.forEach((sdoc) => deletes.push(deleteDoc(doc(sessionsColl, sdoc.id))));
+      snap.forEach((sdoc) => {
+        deletes.push(
+          (async () => {
+            try {
+              await deleteDoc(doc(sessionsColl, sdoc.id));
+              console.log(`[CLEANUP] Deleted pending session: ${sdoc.id}`);
+            } catch (err) {
+              console.warn(`[CLEANUP] Failed to delete pending session ${sdoc.id}`, err);
+            }
+          })()
+        );
+      });
       await Promise.all(deletes);
     } catch (err) {
-      console.error('forceCleanupUserPending error', err);
+      console.error('[CLEANUP] forceCleanupUserPending error', err);
     }
-  }, [sessionsColl, user.id]);
+  }, []);
 
-  // Internal: set up listener for a given session doc. Ensures onMatch is fired once.
+  // Internal: set up listener for a given session doc.  Ensures onMatch is fired once. 
   const attachSessionListener = useCallback(
-    (sessionId: string, localOnMatch?: (partner: Partner, sessionId: string) => void) => {
-      // detach previous
+    (sessionId: string, userId: string, localOnMatch?: (partner: Partner, sessionId: string) => void) => {
+      // Detach previous listener
       if (sessionListenerUnsubRef.current) {
         sessionListenerUnsubRef.current();
         sessionListenerUnsubRef.current = null;
       }
 
       matchedRef.current = false;
-      onMatchRef.current = localOnMatch;
+      currentSessionIdRef.current = sessionId;
 
-      const sRef = sessionDocRef(sessionId);
+      const sessionsColl = collection(db, SESSIONS_COLLECTION);
+      const sRef = doc(sessionsColl, sessionId);
+
       const unsub = onSnapshot(
         sRef,
         (snap) => {
-          const data = snap.data?.() ?? snap.data();
-          if (!data) return;
+          // Session was deleted
+          if (!snap.exists()) {
+            console.log(`[LISTENER] Session ${sessionId} was deleted`);
+            return;
+          }
 
-          // If session was deleted, nothing to do
-          // data may be undefined when deleted; handled above
+          const data = snap.data() as any;
 
           // If session already started, trigger match callback (only once)
-          if (data.started === true && !matchedRef.current) {
+          if (data. started === true && ! matchedRef.current) {
             matchedRef.current = true;
+            console.log(`[LISTENER] Session ${sessionId} started! `);
+
+            if (! isMountedRef.current) {
+              console.warn('[LISTENER] Component unmounted, skipping match callback');
+              return;
+            }
+
             try {
-              // find partner info
+              // Find partner info
               const participants: any[] = data.participants || [];
               const partnerObj: Partner | undefined = participants
-                .map((p) => (p.userId === user.id ? null : p))
-                .filter(Boolean)[0] as Partner | undefined;
+                .find((p) => p.userId !== userId);
 
-              if (partnerObj && onMatchRef.current) {
-                onMatchRef.current(partnerObj, snap.id);
+              if (partnerObj) {
+                console.log(`[LISTENER] Found partner:`, partnerObj);
+                if (isMountedRef.current) {
+                  setStatus('MATCHED');
+                  if (localOnMatch) {
+                    localOnMatch(
+                      {
+                        id: partnerObj.userId,
+                        name: partnerObj.displayName || 'Partner',
+                        type: data.config?. type || 'ANY',
+                      } as Partner,
+                      snap.id
+                    );
+                  }
+                }
               }
             } catch (err) {
-              console.error('onSnapshot onMatch error', err);
+              console.error('[LISTENER] onMatch error', err);
             }
             return;
           }
 
-          // If session not started but has two participants, try to mark started=true via transaction.
+          // If session not started but has two participants, try to mark started=true via transaction
           if (data.started === false && Array.isArray(data.participants) && data.participants.length >= 2) {
-            // fire-and-forget: attempt to set started=true if still false
+            console.log(`[LISTENER] Session ${sessionId} has 2 participants, attempting to start... `);
+
+            // Fire-and-forget: attempt to set started=true if still false
             (async () => {
               try {
                 await runTransaction(db, async (tx) => {
                   const sSnap = await tx.get(sRef);
-                  if (!sSnap.exists()) return;
+                  if (!sSnap.exists()) {
+                    console.warn('[TRANSACTION] Session no longer exists');
+                    return;
+                  }
                   const sData: any = sSnap.data();
-                  if (sData.started === true) return;
+                  if (sData. started === true) {
+                    console.log('[TRANSACTION] Session already started');
+                    return;
+                  }
                   // Mark started
                   tx.update(sRef, { started: true });
+                  console. log('[TRANSACTION] Marked session as started');
                 });
-                // after transaction completes, onSnapshot will receive started === true and call onMatch
+                // After transaction completes, onSnapshot will receive started === true and call onMatch
               } catch (err) {
-                // ignore races or transaction failures
-                console.warn('Failed to mark session started in transaction', err);
+                console.warn('[TRANSACTION] Failed to mark session started', err);
               }
             })();
           }
         },
         (error) => {
-          console.error('session onSnapshot error', error);
+          console.error('[LISTENER] onSnapshot error', error);
+          if (isMountedRef.current) {
+            setError(`Session listener error: ${error.message}`);
+          }
         }
       );
 
       sessionListenerUnsubRef.current = unsub;
       return unsub;
     },
-    [db, user.id]
+    []
   );
 
-  // Start the periodic cleanup when searching / when hook mounts
-  useEffect(() => {
-    // always run cleanup on mount once
-    cleanupStaleSessions().catch((e) => console.error(e));
-
-    // schedule interval
-    const id = window.setInterval(() => {
-      cleanupStaleSessions().catch((e) => console.error(e));
-    }, CLEANUP_INTERVAL_MS);
-    cleanupIntervalRef.current = id;
-
-    return () => {
-      if (cleanupIntervalRef.current) {
-        clearInterval(cleanupIntervalRef.current);
-        cleanupIntervalRef.current = null;
-      }
-      // cleanup any attached listener
-      if (sessionListenerUnsubRef.current) {
-        sessionListenerUnsubRef.current();
-        sessionListenerUnsubRef.current = null;
-      }
-      // best-effort cleanup of pending things for this user
-      forceCleanupUserPending().catch(() => {});
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // run once
-
-  const startSearch = useCallback(
-    async (config: SessionConfig, onMatch?: (partner: Partner, sessionId: string) => void) => {
-      setLastError(undefined);
-
-      // Prevent starting if user already has a truly active session
-      try {
-        const active = await hasActiveSession();
-        if (active) {
-          setLastError("You're already in an active session!");
-          return;
-        }
-      } catch (err) {
-        // continue but warn
-        console.warn('Error checking active sessions', err);
-      }
-
-      setIsSearching(true);
-      onMatchRef.current = onMatch;
-      matchedRef.current = false;
+  // Attempt to find and match with a partner
+  const attemptMatch = useCallback(
+    async (userId: string, config: SessionConfig) => {
+      if (!isMountedRef.current) return;
 
       try {
-        // Force-clean any stale pending queue/session for this user to avoid being blocked
-        await forceCleanupUserPending();
+        const queueColl = collection(db, QUEUE_COLLECTION);
+        const sessionsColl = collection(db, SESSIONS_COLLECTION);
 
-        // Create a queue doc for this user (use user.id as doc id so we can delete easily)
-        const myQueueRef = userQueueDocRef();
-        const queuePayload = {
-          userId: user.id,
-          userDisplayName: user.displayName ?? '',
-          userPhotoURL: (user as any).photoURL ?? '',
-          config,
-          createdAt: serverTimestamp(),
-        };
-        await setDoc(myQueueRef, queuePayload);
-
-        // Try to find a partner in queue that is not this user and matches config.
-        // Keep the matching logic simple and consistent with original: oldest matching partner.
-        // Note: adjust this query to add more matching criteria if required by original logic.
+        // Try to find a partner in queue that is not this user and matches config. 
         const partnerQuery = query(
           queueColl,
-          where('userId', '!=', user.id),
+          where('userId', '!=', userId),
           orderBy('createdAt', 'asc'),
           limit(1)
         );
         const partnerSnap = await getDocs(partnerQuery);
 
-        if (partnerSnap.empty) {
-          // No partner found: remain in queue. Caller can cancelSearch or try again.
+        if (partnerSnap. empty) {
+          console.log(`[MATCH] No partner found in queue yet for user ${userId}`);
           return;
         }
 
@@ -270,30 +322,43 @@ export function useMatchmaking(user: User): UseMatchmakingReturn {
         const partnerData = partnerDoc.data() as any;
         const partnerId = partnerData.userId as string;
 
-        // run transaction: confirm both queue docs exist, create session, delete both queue docs
-        const sessionRef = sessionDocRef(); // auto id
+        console.log(`[MATCH] Found potential partner: ${partnerId}`);
+
+        // Run transaction: confirm both queue docs exist, create session, delete both queue docs
+        const myQueueRef = doc(queueColl, userId);
+        const partnerQueueRef = doc(queueColl, partnerId);
+        const sessionRef = doc(sessionsColl); // Auto-generated ID
+
         await runTransaction(db, async (tx) => {
-          const myQueueSnap = await tx.get(myQueueRef);
-          const partnerQueueRef = doc(queueColl, partnerId);
+          const myQueueSnap = await tx. get(myQueueRef);
           const partnerQueueSnap = await tx.get(partnerQueueRef);
 
-          // If partner or me is gone, abort the transaction and leave user's queue for retry
-          if (!myQueueSnap.exists() || !partnerQueueSnap.exists()) {
-            throw new Error('queue changed - aborting match');
+          // If partner or me is gone, abort the transaction
+          if (!myQueueSnap.exists()) {
+            console.warn('[TRANSACTION] My queue entry is gone, aborting match');
+            throw new Error('My queue entry disappeared - another match may have occurred');
           }
 
+          if (! partnerQueueSnap.exists()) {
+            console.warn('[TRANSACTION] Partner queue entry is gone, aborting match');
+            throw new Error('Partner queue entry disappeared - they may have matched already');
+          }
+
+          const myData = myQueueSnap.data() as any;
+          const currentUser = myData.userDisplayName;
+
           const sessionPayload = {
-            type: (config.type as SessionType) ?? 'default',
+            type: (config.type as SessionType) ??  'ANY',
             config,
             participants: [
               {
-                userId: user.id,
-                displayName: user.displayName ?? '',
-                photoURL: (user as any).photoURL ?? '',
+                userId: userId,
+                displayName: currentUser || 'User',
+                photoURL: myData.userPhotoURL ??  '',
               },
               {
                 userId: partnerId,
-                displayName: partnerData.userDisplayName ?? '',
+                displayName: partnerData.userDisplayName ??  'Partner',
                 photoURL: partnerData.userPhotoURL ?? '',
               },
             ],
@@ -301,67 +366,139 @@ export function useMatchmaking(user: User): UseMatchmakingReturn {
             started: false,
           };
 
+          // All checks passed, create session and delete both queue entries atomically
           tx.set(sessionRef, sessionPayload);
           tx.delete(myQueueRef);
           tx.delete(partnerQueueRef);
+
+          console.log(`[TRANSACTION] Created session ${sessionRef.id} between ${userId} and ${partnerId}`);
         });
 
         // Attach listener so onMatch will be triggered when started flips to true
-        attachSessionListener(sessionRef.id, onMatchRef.current);
+        attachSessionListener(sessionRef.id, userId, onMatchRef.current);
 
-        // If the created session doesn't become started within a short time, cleanup will remove it automatically.
-        // Caller can re-queue after cancelSearch or after session is removed by cleanup.
+        console.log(`[MATCH] Successfully matched!  Session: ${sessionRef.id}`);
       } catch (err: any) {
-        // If transaction failed due to race, don't block re-queueing
-        console.warn('startSearch error', err);
-        setLastError(err?.message ?? String(err));
-      } finally {
-        // keep isSearching true until user cancels or matched (match will call onMatch via listener)
-        // But if matchedRef was set synchronously by listener, we can clear searching.
-        if (matchedRef.current) {
-          setIsSearching(false);
+        // If transaction failed due to race, don't block re-matching
+        console.warn('[MATCH] Match attempt failed, will retry', err);
+      }
+    },
+    [attachSessionListener]
+  );
+
+  const joinQueue = useCallback(
+    async (config: SessionConfig) => {
+      if (!user) {
+        setError('No user provided');
+        console.error('[JOIN] No user provided to joinQueue');
+        return;
+      }
+
+      if (! isMountedRef.current) {
+        console.warn('[JOIN] Component not mounted, aborting joinQueue');
+        return;
+      }
+
+      setError(undefined);
+      setStatus('SEARCHING');
+
+      try {
+        console.log(`[JOIN] Starting matchmaking for user: ${user.id}`);
+
+        // Check if user already has a truly active session
+        const hasActive = await hasActiveSession(user. id);
+        if (hasActive) {
+          setError("You're already in an active session!");
+          setStatus('IDLE');
+          console.warn('[JOIN] User already has active session');
+          return;
+        }
+
+        // Force-clean any stale pending queue/session for this user to avoid being blocked
+        await forceCleanupUserPending(user.id);
+
+        // Create a queue doc for this user
+        const queueColl = collection(db, QUEUE_COLLECTION);
+        const myQueueRef = doc(queueColl, user.id);
+        const queuePayload = {
+          userId: user.id,
+          userDisplayName: user.name ??  '',
+          userPhotoURL: user.avatar ?? '',
+          config,
+          createdAt: serverTimestamp(),
+        };
+
+        await setDoc(myQueueRef, queuePayload);
+        console.log(`[JOIN] Added user to queue: ${user.id}`);
+
+        activeConfigRef.current = config;
+        matchedRef.current = false;
+
+        // Start matching attempts
+        await attemptMatch(user.id, config);
+
+        // Set up periodic matching retry in case first attempt didn't find anyone
+        if (matchRetryIntervalRef. current) {
+          clearInterval(matchRetryIntervalRef.current);
+        }
+
+        matchRetryIntervalRef.current = setInterval(() => {
+          if (isMountedRef.current && status === 'SEARCHING' && activeConfigRef.current) {
+            console.log('[RETRY] Attempting match again.. .');
+            attemptMatch(user.id, activeConfigRef.current). catch((err) =>
+              console.error('[RETRY] Match attempt error', err)
+            );
+          }
+        }, MATCH_RETRY_INTERVAL_MS);
+      } catch (err: any) {
+        console.error('[JOIN] joinQueue error', err);
+        if (isMountedRef.current) {
+          setError(err?. message ??  String(err));
+          setStatus('IDLE');
         }
       }
     },
-    [attachSessionListener, db, forceCleanupUserPending, hasActiveSession, queueColl, user.id, user.displayName]
+    [user, attemptMatch, hasActiveSession, forceCleanupUserPending, status]
   );
 
   const cancelSearch = useCallback(async () => {
-    setLastError(undefined);
-    setIsSearching(false);
+    if (! user) return;
 
-    // detach session listener
+    console.log(`[CANCEL] Canceling search for user: ${user.id}`);
+    setError(undefined);
+    setStatus('IDLE');
+
+    // Stop retry interval
+    if (matchRetryIntervalRef.current) {
+      clearInterval(matchRetryIntervalRef.current);
+      matchRetryIntervalRef.current = null;
+    }
+
+    // Detach session listener
     if (sessionListenerUnsubRef.current) {
       sessionListenerUnsubRef.current();
       sessionListenerUnsubRef.current = null;
     }
 
     try {
-      // Remove queue doc for this user
-      try {
-        await deleteDoc(userQueueDocRef());
-      } catch (e) {
-        // ignore
-      }
-
-      // Find sessions where this user is a participant and started == false and delete them.
-      const q = query(sessionsColl, where('participants', 'array-contains', user.id), where('started', '==', false));
-      const snap = await getDocs(q);
-      const deletes: Promise<void>[] = [];
-      snap.forEach((sdoc) => {
-        deletes.push(deleteDoc(doc(sessionsColl, sdoc.id)));
-      });
-      await Promise.all(deletes);
+      await forceCleanupUserPending(user.id);
+      console.log(`[CANCEL] Successfully cleaned up user pending state`);
     } catch (err) {
-      console.error('cancelSearch error', err);
-      setLastError(String(err));
+      console.error('[CANCEL] cancelSearch error', err);
+      if (isMountedRef.current) {
+        setError(String(err));
+      }
     }
-  }, [sessionsColl, user.id]);
+
+    matchedRef.current = false;
+    activeConfigRef.current = null;
+    currentSessionIdRef.current = null;
+  }, [user, forceCleanupUserPending]);
 
   return {
-    startSearch,
+    status,
+    joinQueue,
     cancelSearch,
-    isSearching,
-    lastError,
+    error,
   };
 }

@@ -37,60 +37,85 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
 
   // Listen to session document once we have a session ID
   // This ensures BOTH users are properly matched before proceeding
-  useEffect(() => {
-    if (! sessionIdToWatch || hasCalledOnMatch) {
-      return;
-    }
+ // Listen to session document once we have a session ID
+useEffect(() => {
+  if (!sessionIdToWatch || hasCalledOnMatch) {
+    return;
+  }
 
-    console.log('[MATCHING] Watching session:', sessionIdToWatch);
+  console.log('[MATCHING] Watching session:', sessionIdToWatch);
 
-    const sessionsColl = collection(db, 'sessions');
-    const sessionRef = doc(sessionsColl, sessionIdToWatch);
+  const sessionsColl = collection(db, 'sessions');
+  const sessionRef = doc(sessionsColl, sessionIdToWatch);
 
-    const unsubscribe = onSnapshot(
-      sessionRef,
-      (snap) => {
-        if (! snap.exists()) {
-          console.warn('[MATCHING] Session was deleted');
-          return;
+  const unsubscribe = onSnapshot(
+    sessionRef,
+    (snap) => {
+      if (!snap.exists()) {
+        console.warn('[MATCHING] Session was deleted');
+        return;
+      }
+
+      const sessionData = snap.data() as any;
+
+      console.log('[MATCHING] Session update:', {
+        participants: sessionData.participants?.length || 0,
+        started: sessionData.started
+      });
+
+      // NEW: Check if already started (might have missed the 2-participant state)
+      if (sessionData.started === true && !hasCalledOnMatch) {
+        console.log('[MATCHING] Session already started, joining immediately');
+        setHasCalledOnMatch(true);
+        
+        const participantInfo: any[] = sessionData.participantInfo || [];
+        const partnerInfo = participantInfo.find((p: any) => p.userId !== user.id);
+
+        if (partnerInfo) {
+          const partner: Partner = {
+            id: partnerInfo.userId,
+            name: partnerInfo.displayName || 'Partner',
+            type: sessionData.config?.type || 'ANY',
+          };
+
+          console.log('[MATCHING] Calling onMatched (already started):', partner);
+          onMatched(partner, sessionIdToWatch);
         }
+        return;
+      }
 
-        const sessionData = snap. data() as any;
-
-        // Wait for session to have 2 participants (both users in)
-        if (Array.isArray(sessionData.participants) && sessionData.participants.length >= 2) {
-          console. log('[MATCHING] Session has 2 participants, proceeding to negotiation');
+      // Wait for session to have 2 participants
+      if (Array.isArray(sessionData.participants) && sessionData.participants.length >= 2) {
+        console.log('[MATCHING] Session has 2 participants, proceeding to negotiation');
+        
+        if (!hasCalledOnMatch) {
+          setHasCalledOnMatch(true);
           
-          // Now we can safely call onMatched
-          if (! hasCalledOnMatch) {
-            setHasCalledOnMatch(true);
-            
-            // Get partner info
-            const participantInfo: any[] = sessionData.participantInfo || [];
-            const partnerInfo = participantInfo.find((p: any) => p.userId !== user.id);
+          const participantInfo: any[] = sessionData.participantInfo || [];
+          const partnerInfo = participantInfo.find((p: any) => p.userId !== user.id);
 
-            if (partnerInfo) {
-              const partner: Partner = {
-                id: partnerInfo.userId,
-                name: partnerInfo.displayName || 'Partner',
-                type: sessionData.config?. type || 'ANY',
-              };
+          if (partnerInfo) {
+            const partner: Partner = {
+              id: partnerInfo.userId,
+              name: partnerInfo.displayName || 'Partner',
+              type: sessionData.config?.type || 'ANY',
+            };
 
-              console.log('[MATCHING] Calling onMatched with partner:', partner);
-              onMatched(partner, sessionIdToWatch);
-            }
+            console.log('[MATCHING] Calling onMatched with partner:', partner);
+            onMatched(partner, sessionIdToWatch);
           }
         }
-      },
-      (error) => {
-        console.error('[MATCHING] Session listener error:', error);
       }
-    );
+    },
+    (error) => {
+      console.error('[MATCHING] Session listener error:', error);
+    }
+  );
 
-    return () => {
-      unsubscribe();
-    };
-  }, [sessionIdToWatch, user. id, onMatched, hasCalledOnMatch]);
+  return () => {
+    unsubscribe();
+  };
+}, [sessionIdToWatch, user.id, onMatched, hasCalledOnMatch]);
 
   // Update status text
   useEffect(() => {

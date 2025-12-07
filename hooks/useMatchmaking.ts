@@ -400,7 +400,7 @@ matchInProgressRef.current = true;
       } catch (err: any) {
   // If transaction failed due to race, don't block re-matching
   console.warn('[MATCH] Match attempt failed, will retry', err);
-}
+
       } finally {
         matchInProgressRef.current = false;
       }

@@ -51,6 +51,8 @@ const matchRetryIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isMountedRef = useRef<boolean>(true);
   const currentSessionIdRef = useRef<string | null>(null);
   const activeConfigRef = useRef<SessionConfig | null>(null);
+  const matchInProgressRef = useRef<boolean>(false); // <-- ADD THIS
+
 
   // Update callback ref when onMatch changes
   useEffect(() => {
@@ -307,7 +309,12 @@ const matchRetryIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const attemptMatch = useCallback(
   async (userId: string, config: SessionConfig) => {
     if (!isMountedRef.current || matchedRef.current) return; // ADD THIS LINE
-    
+    if (matchInProgressRef.current) {
+  console.log('[MATCH] Attempt blocked: previous attempt still running');
+  return;
+}
+matchInProgressRef.current = true;
+
     try {
       const queueColl = collection(db, QUEUE_COLLECTION);
         const sessionsColl = collection(db, SESSIONS_COLLECTION);
@@ -394,6 +401,9 @@ const matchRetryIntervalRef = useRef<NodeJS.Timeout | null>(null);
   // If transaction failed due to race, don't block re-matching
   console.warn('[MATCH] Match attempt failed, will retry', err);
 }
+      } finally {
+        matchInProgressRef.current = false;
+      }
     },
     [attachSessionListener]
   );

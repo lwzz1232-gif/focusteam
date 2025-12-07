@@ -27,57 +27,17 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [startTime] = useState(Date.now());
   
   // WebRTC State
-  const [sessionId, setSessionId] = useState<string>('');
+  
   const [isInitiator, setIsInitiator] = useState(false);
   const [isReadyForWebRTC, setIsReadyForWebRTC] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
-
+ useEffect(() => {
+    console.log("[LIVESESSION] Using session ID:", sessionId);
+    setIsReadyForWebRTC(true);
+    setSessionReady(true);
+  }, [sessionId]);
   // Initialize Session: Get ID and determine who calls whom
-  useEffect(() => {
-    let mounted = true;
-    
-    const initSession = async () => {
-        try {
-            // Find the active session for this user
-            const q = query(
-                collection(db, 'sessions'),
-                where('participants', 'array-contains', user.id),
-                where('status', '==', 'active')
-            );
-            const snapshot = await getDocs(q);
-            
-            if (snapshot.empty) {
-                console.error("Session not found!");
-                return;
-            }
-
-            const docSnap = snapshot.docs[0];
-            const data = docSnap.data();
-            
-            if (mounted) {
-                setSessionId(docSnap.id);
-                
-                // DETERMINISTIC INITIATOR LOGIC
-                // The user listed as 'user1' in the DB is ALWAYS the initiator.
-                // This prevents race conditions where both try to call.
-                if (data.user1 && data.user1.id === user.id) {
-                    setIsInitiator(true);
-                } else {
-                    setIsInitiator(false);
-                }
-                
-                setIsReadyForWebRTC(true);
-setSessionReady(true); // Enable chat/tasks
-            }
-        } catch (e) {
-            console.error("Error initializing session:", e);
-        }
-    };
-
-    initSession();
-    return () => { mounted = false; };
-  }, [user.id]);
-
+  
   // Hook handles the heavy lifting of P2P connection
   const { localStream, remoteStream } = useWebRTC(isReadyForWebRTC ? sessionId : '', user.id, isInitiator);
 

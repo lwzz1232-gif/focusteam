@@ -44,7 +44,7 @@ export const App: React.FC = () => {
   const [currentScreen, setCurrentScreen] = useState<Screen>(Screen.SPLASH);
   
   const [sessionConfig, setSessionConfig] = useState<SessionConfig>({
-    type: SessionType. STUDY,
+    type: SessionType.STUDY,
     duration: SessionDuration.MIN_30,
     mode: SessionMode.DEEP_WORK,
     preTalkMinutes: 5,
@@ -76,7 +76,7 @@ export const App: React.FC = () => {
   }, [user, loading]);
 
   const handleSplashComplete = () => {
-    if (user) setCurrentScreen(Screen. DASHBOARD);
+    if (user) setCurrentScreen(Screen.DASHBOARD);
     else setCurrentScreen(Screen.LOGIN);
   };
 
@@ -84,11 +84,11 @@ export const App: React.FC = () => {
     setSessionConfig(config);
     
     // TEST MODE: Skip matching for admins
-    if (config.duration === SessionDuration.TEST && user?. role === 'admin') {
+    if (config.duration === SessionDuration.TEST && user?.role === 'admin') {
       const botPartner: Partner = {
         id: 'bot-test-' + Date.now(),
         name: 'Test Bot',
-        type: config. type
+        type: config.type
       };
       setPartner(botPartner);
       setCurrentScreen(Screen.SESSION); // Skip matching & negotiation
@@ -98,7 +98,7 @@ export const App: React.FC = () => {
   };
 
   const handleMatched = (partner: Partner, sessionId: string) => {
-    console.log(`[APP] Match found!  Partner:`, partner, 'SessionId:', sessionId);
+    console.log(`[APP] Match found! Partner:`, partner, 'SessionId:', sessionId);
     
     setPartner(partner);
     setSessionId(sessionId);
@@ -113,7 +113,7 @@ export const App: React.FC = () => {
 
   const handleNegotiationComplete = (finalConfig: SessionConfig) => {
     setSessionConfig(finalConfig);
-    setCurrentScreen(Screen. SESSION);
+    setCurrentScreen(Screen.SESSION);
   };
 
   const handleCancelMatch = () => {

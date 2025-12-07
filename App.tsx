@@ -1,152 +1,180 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Layout } from './components/Layout';
+import { Splash } from './screens/Splash';
 import { Login } from './screens/Login';
 import { Dashboard } from './screens/Dashboard';
 import { Matching } from './screens/Matching';
 import { Negotiation } from './screens/Negotiation';
 import { LiveSession } from './screens/LiveSession';
 import { Admin } from './screens/Admin';
-import { Splash } from './screens/Splash';
-import { Screen, User, SessionConfig, Partner, SessionType, SessionDuration, SessionMode } from './types';
 import { useAuth } from './hooks/useAuth';
-import { auth, isFirebaseConfigured } from './utils/firebaseConfig';
-import { AlertTriangle, FileText, RefreshCw } from 'lucide-react';
+import { Screen, SessionConfig, Partner, SessionType, SessionDuration, SessionMode } from './types';
+import { db } from './utils/firebaseConfig';
+import { collection, query, where, getDocs, onSnapshot, doc } from 'firebase/firestore';
+import { AlertTriangle, RefreshCw } from 'lucide-react';
 
-export default function App() {
-  // --- SAFETY CHECK START ---
-  if (!isFirebaseConfigured) {
+export const App: React.FC = () => {
+  // SAFETY CHECK - if auth hook fails
+  let authHook = null;
+  try {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    authHook = useAuth();
+  } catch (e) {
+    console.error("Auth hook failed:", e);
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 font-inter text-slate-200">
-        <div className="max-w-xl w-full bg-slate-900 border border-red-500/30 rounded-2xl p-8 shadow-2xl">
-          <div className="flex items-center gap-4 mb-6">
-             <div className="p-3 bg-red-500/20 rounded-full text-red-400">
-                <AlertTriangle size={32} />
-             </div>
-             <div>
-                <h1 className="text-2xl font-bold text-white">Setup Required</h1>
-                <p className="text-slate-400">Missing Firebase Configuration</p>
-             </div>
+      <div className="w-screen h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
+        <div className="max-w-md w-full bg-red-500/10 border border-red-500/50 rounded-xl p-6 text-center">
+          <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertTriangle size={32} className="text-red-500" />
           </div>
-          
-          <div className="space-y-4 mb-8">
-             <p className="text-sm text-slate-300">
-               The app cannot connect to the backend because the API keys are missing.
-             </p>
-             <div className="bg-black/50 p-4 rounded-lg border border-slate-800 font-mono text-xs text-slate-400 overflow-x-auto">
-                <div className="flex items-center gap-2 text-yellow-400 mb-2 border-b border-slate-800 pb-2">
-                   <FileText size={14} /> .env.local
-                </div>
-                NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSy...<br/>
-                NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=...<br/>
-                NEXT_PUBLIC_FIREBASE_PROJECT_ID=...<br/>
-             </div>
-          </div>
-
+          <h3 className="text-xl font-bold text-white mb-2">Critical Error</h3>
+          <p className="text-slate-300 mb-4">Authentication system failed to load</p>
           <button 
             onClick={() => window.location.reload()}
             className="w-full bg-white text-black font-bold py-3 rounded-lg hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"
           >
-             <RefreshCw size={18} /> Reload App
+            <RefreshCw size={18} /> Reload App
           </button>
         </div>
       </div>
     );
   }
-  // --- SAFETY CHECK END ---
 
-  const { user, loading } = useAuth();
+  const { user, loading } = authHook;
   const [currentScreen, setCurrentScreen] = useState<Screen>(Screen.SPLASH);
   
   const [sessionConfig, setSessionConfig] = useState<SessionConfig>({
-    type: SessionType.STUDY,
+    type: SessionType. STUDY,
     duration: SessionDuration.MIN_30,
     mode: SessionMode.DEEP_WORK,
     preTalkMinutes: 5,
     postTalkMinutes: 5
   });
   const [partner, setPartner] = useState<Partner | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      // Clean up any subscriptions
+    };
+  }, []);
 
   useEffect(() => {
     if (!loading) {
-       // Auto-redirect logic
-       if (user) {
-         if (currentScreen === Screen.LOGIN) {
-            setCurrentScreen(Screen.DASHBOARD);
-         }
-       } else {
-         if (currentScreen !== Screen.SPLASH && currentScreen !== Screen.LOGIN) {
-             setCurrentScreen(Screen.LOGIN);
-         }
-       }
+      // Auto-redirect logic
+      if (user) {
+        if (currentScreen === Screen.LOGIN) {
+          setCurrentScreen(Screen.DASHBOARD);
+        }
+      } else {
+        if (currentScreen !== Screen.SPLASH && currentScreen !== Screen.LOGIN) {
+          setCurrentScreen(Screen.LOGIN);
+        }
+      }
     }
   }, [user, loading]);
 
   const handleSplashComplete = () => {
-    if (user) setCurrentScreen(Screen.DASHBOARD);
+    if (user) setCurrentScreen(Screen. DASHBOARD);
     else setCurrentScreen(Screen.LOGIN);
+  };
+
+  const handleStartMatch = (config: SessionConfig) => {
+    setSessionConfig(config);
+    
+    // TEST MODE: Skip matching for admins
+    if (config.duration === SessionDuration.TEST && user?. role === 'admin') {
+      const botPartner: Partner = {
+        id: 'bot-test-' + Date.now(),
+        name: 'Test Bot',
+        type: config. type
+      };
+      setPartner(botPartner);
+      setCurrentScreen(Screen.SESSION); // Skip matching & negotiation
+    } else {
+      setCurrentScreen(Screen.MATCHING);
+    }
+  };
+
+  const handleMatched = (partner: Partner, sessionId: string) => {
+    console.log(`[APP] Match found!  Partner:`, partner, 'SessionId:', sessionId);
+    
+    setPartner(partner);
+    setSessionId(sessionId);
+    
+    // Listen to the session document to know when BOTH users have matched
+    // The Matching component will handle the onMatched callback,
+    // but we need to wait for the session to transition properly
+    
+    // Move to negotiation immediately after match
+    setCurrentScreen(Screen.NEGOTIATION);
+  };
+
+  const handleNegotiationComplete = (finalConfig: SessionConfig) => {
+    setSessionConfig(finalConfig);
+    setCurrentScreen(Screen. SESSION);
+  };
+
+  const handleCancelMatch = () => {
+    setPartner(null);
+    setSessionId(null);
+    setCurrentScreen(Screen.DASHBOARD);
+  };
+
+  const handleEndSession = () => {
+    setPartner(null);
+    setSessionId(null);
+    setCurrentScreen(Screen.DASHBOARD);
   };
 
   return (
     <Layout
       user={user} 
       currentScreen={currentScreen}
-      onLogout={() => auth?.signOut()}
+      onLogout={() => {}}
       onAdminClick={() => setCurrentScreen(Screen.ADMIN)}
     >
       {currentScreen === Screen.SPLASH && <Splash onComplete={handleSplashComplete} />}
       
       {currentScreen === Screen.LOGIN && <Login onLogin={() => {}} />}
 
-     {currentScreen === Screen.DASHBOARD && user && (
-    <Dashboard 
-      user={user} 
-      onStartMatch={(config) => { 
-        setSessionConfig(config); 
-        // TEST MODE: Skip matching for admins
-        if (config.duration === SessionDuration.TEST && user.role === 'admin') {
-          const botPartner: Partner = {
-            id: 'bot-test-' + Date.now(),
-            name: 'Test Bot',
-            type: config.type
-          };
-          setPartner(botPartner);
-          setCurrentScreen(Screen.SESSION); // Skip matching & negotiation
-        } else {
-          setCurrentScreen(Screen.MATCHING);
-        }
-      }} 
-    />
-)}
+      {currentScreen === Screen.DASHBOARD && user && (
+        <Dashboard 
+          user={user} 
+          onStartMatch={handleStartMatch}
+        />
+      )}
 
       {currentScreen === Screen.MATCHING && user && (
         <Matching 
           user={user}
           config={sessionConfig} 
-          onMatched={(p) => { setPartner(p); setCurrentScreen(Screen.NEGOTIATION); }}
-          onCancel={() => setCurrentScreen(Screen.DASHBOARD)}
+          onMatched={handleMatched}
+          onCancel={handleCancelMatch}
         />
       )}
 
-      {currentScreen === Screen.NEGOTIATION && partner && (
+      {currentScreen === Screen.NEGOTIATION && partner && user && (
         <Negotiation
           config={sessionConfig}
           partner={partner}
-          onNegotiationComplete={(cfg) => { setSessionConfig(cfg); setCurrentScreen(Screen.SESSION); }}
-          onSkipMatch={() => setCurrentScreen(Screen.MATCHING)}
+          onNegotiationComplete={handleNegotiationComplete}
+          onSkipMatch={handleCancelMatch}
         />
       )}
 
-      {currentScreen === Screen.SESSION && user && partner && (
+      {currentScreen === Screen.SESSION && user && partner && sessionId && (
         <LiveSession 
           user={user}
           partner={partner}
           config={sessionConfig}
-          onEndSession={() => setCurrentScreen(Screen.DASHBOARD)}
+          sessionId={sessionId}
+          onEndSession={handleEndSession}
         />
       )}
 
       {currentScreen === Screen.ADMIN && <Admin onBack={() => setCurrentScreen(Screen.DASHBOARD)} />}
     </Layout>
   );
-}
+};

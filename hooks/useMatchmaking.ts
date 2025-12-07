@@ -305,11 +305,11 @@ const matchRetryIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Attempt to find and match with a partner
   const attemptMatch = useCallback(
-    async (userId: string, config: SessionConfig) => {
-      if (!isMountedRef.current) return;
-
-      try {
-        const queueColl = collection(db, QUEUE_COLLECTION);
+  async (userId: string, config: SessionConfig) => {
+    if (!isMountedRef.current || matchedRef.current) return; // ADD THIS LINE
+    
+    try {
+      const queueColl = collection(db, QUEUE_COLLECTION);
         const sessionsColl = collection(db, SESSIONS_COLLECTION);
 
         // Try to find a partner in queue that is not this user
@@ -445,21 +445,20 @@ const matchRetryIntervalRef = useRef<NodeJS.Timeout | null>(null);
         matchedRef.current = false;
 
         // Start matching attempts
-        await attemptMatch(user.id, config);
-
-        // Set up periodic matching retry in case first attempt didn't find anyone
-        if (matchRetryIntervalRef.current) {
-          clearInterval(matchRetryIntervalRef.current);
-        }
-
-        matchRetryIntervalRef.current = setInterval(() => {
-          if (isMountedRef.current && status === 'SEARCHING' && activeConfigRef.current) {
-            console.log('[RETRY] Attempting match again.. .');
-            attemptMatch(user.id, activeConfigRef.current). catch((err) =>
-              console.error('[RETRY] Match attempt error', err)
-            );
-          }
-        }, MATCH_RETRY_INTERVAL_MS);
+      matchRetryIntervalRef.current = setInterval(() => {
+  if (isMountedRef.current && status === 'SEARCHING' && activeConfigRef.current && !matchedRef.current) {
+    console.log('[RETRY] Attempting match again...');
+    attemptMatch(user.id, activeConfigRef.current).catch((err) =>
+      console.error('[RETRY] Match attempt error', err)
+    );
+  } else if (matchedRef.current) {
+    // Stop retrying once matched
+    if (matchRetryIntervalRef.current) {
+      clearInterval(matchRetryIntervalRef.current);
+      matchRetryIntervalRef.current = null;
+    }
+  }
+}, MATCH_RETRY_INTERVAL_MS);
       } catch (err: any) {
         console.error('[JOIN] joinQueue error', err);
         if (isMountedRef.current) {

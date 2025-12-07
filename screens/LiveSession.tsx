@@ -28,6 +28,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [sessionId, setSessionId] = useState<string>('');
   const [isInitiator, setIsInitiator] = useState(false);
   const [isReadyForWebRTC, setIsReadyForWebRTC] = useState(false);
+  const [sessionReady, setSessionReady] = useState(false);
 
   // Initialize Session: Get ID and determine who calls whom
   useEffect(() => {
@@ -64,6 +65,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                 }
                 
                 setIsReadyForWebRTC(true);
+setSessionReady(true); // Enable chat/tasks
             }
         } catch (e) {
             console.error("Error initializing session:", e);
@@ -90,8 +92,8 @@ const handleExitSession = () => {
         finishSession(true);
     }
 };
- const { messages: chatMessages, sendMessage } = useChat(
-    isReadyForWebRTC ? sessionId : '', 
+const { messages: chatMessages, sendMessage } = useChat(
+    sessionReady ? sessionId : '', 
     user.id, 
     user.name
 );

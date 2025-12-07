@@ -356,41 +356,83 @@ export function useMatchmaking(
 
         console.log(`[MATCH] Found potential partner: ${partnerId}, total in queue: ${allQueueSnap.size}`);
 
-        // First, check if a session already exists between these two users
-        const existingSessionQuery = query(
+        // First, check if a session already exists for either user
+        const myExistingSessionQuery = query(
           sessionsColl,
-          where('participants', 'in', [[userId, partnerId], [partnerId, userId]]),
+          where('participants', 'array-contains', userId),
           where('started', '==', false),
+          orderBy('createdAt', 'desc'),
           limit(1)
         );
-        const existingSessionSnap = await getDocs(existingSessionQuery);
+        const myExistingSessionSnap = await getDocs(myExistingSessionQuery);
         
-        if (!existingSessionSnap.empty) {
-          // Session already exists! Just attach listener
-          const existingSessionId = existingSessionSnap.docs[0].id;
-          console.log(`[MATCH] Found existing session: ${existingSessionId}, attaching listener`);
+        if (!myExistingSessionSnap.empty) {
+          // I already have a pending session! Just attach listener
+          const existingSessionId = myExistingSessionSnap.docs[0].id;
+          console.log(`[MATCH] I already have a pending session: ${existingSessionId}, attaching listener`);
           attachSessionListener(existingSessionId, userId, onMatchRef.current);
           matchInProgressRef.current = false;
           return;
         }
+        
+        // Also check if partner already has a session
+        const partnerExistingSessionQuery = query(
+          sessionsColl,
+          where('participants', 'array-contains', partnerId),
+          where('started', '==', false),
+          orderBy('createdAt', 'desc'),
+          limit(1)
+        );
+        const partnerExistingSessionSnap = await getDocs(partnerExistingSessionQuery);
+        
+        if (!partnerExistingSessionSnap.empty) {
+          // Partner already has a pending session! Check if I'm in it
+          const existingSession = partnerExistingSessionSnap.docs[0];
+          const existingSessionData = existingSession.data() as any;
+          const participants = existingSessionData.participants || [];
+          
+          if (participants.includes(userId)) {
+            // I'm already in this session, just attach listener
+            console.log(`[MATCH] Found shared session with partner: ${existingSession.id}, attaching listener`);
+            attachSessionListener(existingSession.id, userId, onMatchRef.current);
+            matchInProgressRef.current = false;
+            return;
+          }
+        }
 
+        // Create a deterministic session ID based on both user IDs (sorted)
+        // This ensures both users will try to create the exact same session ID
+        const sortedIds = [userId, partnerId].sort();
+        const deterministicSessionId = `${sortedIds[0]}_${sortedIds[1]}_${Date.now()}`;
+        
         // Run transaction: confirm both queue docs exist, create session, delete both queue docs
         const myQueueRef = doc(queueColl, userId);
         const partnerQueueRef = doc(queueColl, partnerId);
-        const sessionRef = doc(sessionsColl); // Auto-generated ID
+        const sessionRef = doc(sessionsColl, deterministicSessionId); // Use deterministic ID
         
         let sessionCreated = false;
-        let createdSessionId = '';
 
         try {
           await runTransaction(db, async (tx) => {
+            // First check if session already exists
+            const existingSessionSnap = await tx.get(sessionRef);
+            if (existingSessionSnap.exists()) {
+              console.log(`[TRANSACTION] Session already exists: ${deterministicSessionId}, joining it`);
+              // Just delete our queue entry and return
+              const myQueueSnap = await tx.get(myQueueRef);
+              if (myQueueSnap.exists()) {
+                tx.delete(myQueueRef);
+              }
+              return;
+            }
+            
             const myQueueSnap = await tx.get(myQueueRef);
             const partnerQueueSnap = await tx.get(partnerQueueRef);
 
             // If either queue entry is gone, check for existing session and abort
             if (!myQueueSnap.exists() || !partnerQueueSnap.exists()) {
-              console.warn('[TRANSACTION] Queue entry missing - likely race condition, will check for existing session');
-              throw new Error('Queue entry missing - checking for existing session');
+              console.warn('[TRANSACTION] Queue entry missing - likely race condition');
+              throw new Error('Queue entry missing');
             }
 
             const myData = myQueueSnap.data() as any;
@@ -421,40 +463,21 @@ export function useMatchmaking(
             tx.delete(myQueueRef);
             tx.delete(partnerQueueRef);
 
-            console.log(`[TRANSACTION] Created session ${sessionRef.id} between ${userId} and ${partnerId}`);
+            console.log(`[TRANSACTION] Created session ${deterministicSessionId} between ${userId} and ${partnerId}`);
             sessionCreated = true;
-            createdSessionId = sessionRef.id;
           });
 
-          if (sessionCreated) {
-            // Attach listener so onMatch will be triggered when started flips to true
-            console.log(`[MATCH] Successfully matched! Attaching listener to session: ${createdSessionId}`);
-            attachSessionListener(createdSessionId, userId, onMatchRef.current);
-            matchInProgressRef.current = false;
-          }
+          // Always attach listener (whether we created it or it already existed)
+          console.log(`[MATCH] Attaching listener to session: ${deterministicSessionId}`);
+          attachSessionListener(deterministicSessionId, userId, onMatchRef.current);
+          matchInProgressRef.current = false;
         } catch (transactionError: any) {
           console.warn('[TRANSACTION] Failed:', transactionError.message);
           
-          // Transaction failed - likely because other user already created session
-          // Search for the session that was created
-          const retrySessionQuery = query(
-            sessionsColl,
-            where('participants', 'array-contains', userId),
-            where('started', '==', false),
-            orderBy('createdAt', 'desc'),
-            limit(1)
-          );
-          const retrySessionSnap = await getDocs(retrySessionQuery);
-          
-          if (!retrySessionSnap.empty) {
-            const foundSessionId = retrySessionSnap.docs[0].id;
-            console.log(`[MATCH] Found session created by partner: ${foundSessionId}, attaching listener`);
-            attachSessionListener(foundSessionId, userId, onMatchRef.current);
-            matchInProgressRef.current = false;
-          } else {
-            console.warn('[MATCH] No session found after transaction failure, will retry');
-            matchInProgressRef.current = false;
-          }
+          // Transaction failed - session might already exist, attach listener anyway
+          console.log(`[MATCH] Attaching listener to session after error: ${deterministicSessionId}`);
+          attachSessionListener(deterministicSessionId, userId, onMatchRef.current);
+          matchInProgressRef.current = false;
         }
         
       } catch (err: any) {

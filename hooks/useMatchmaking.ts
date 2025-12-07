@@ -312,7 +312,7 @@ const quitSession = async (sessionId?: string) => {
     }
   };
 
- const startSessionListener = () => {
+const startSessionListener = () => {
   if (!user) return;
 
   const q = query(
@@ -322,18 +322,24 @@ const quitSession = async (sessionId?: string) => {
   );
 
   const unsubscribe = onSnapshot(q, (snapshot) => {
-    snapshot.docs.forEach((doc) => {
-      const session = doc.data();
-
-      // Skip if already matched locally
+    snapshot.docChanges().forEach((change) => {
+      if (change.type !== 'added') return;
       if (hasMatched.current) return;
 
+      const session = change.doc.data();
       const partnerInfo = session.user1.id === user.id ? session.user2 : session.user1;
-// mark session as started
-const sessionRef = doc(db, 'sessions', change.doc.id);
-await setDoc(sessionRef, { started: true }, { merge: true });
 
-      console.log("[MATCH] Session detected!", doc.id);
+      // mark session as started safely
+      (async () => {
+        try {
+          const sessionRef = doc(db, 'sessions', change.doc.id);
+          await setDoc(sessionRef, { started: true }, { merge: true });
+        } catch (e) {
+          console.error("Failed to mark session as started:", e);
+        }
+      })();
+
+      console.log("[MATCH] Session detected!", change.doc.id);
 
       hasMatched.current = true;
       activeConfig.current = null;
@@ -353,10 +359,13 @@ await setDoc(sessionRef, { started: true }, { merge: true });
         });
       }
     });
-  }, (error) => console.error("Session listener error:", error));
+  }, (error) => {
+    console.error("Session listener error:", error);
+  });
 
   return unsubscribe;
 };
+
 
 const cleanUpStaleSessions = async () => {
   const q = query(

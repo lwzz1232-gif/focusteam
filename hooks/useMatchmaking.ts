@@ -45,7 +45,7 @@ export const useMatchmaking = (user: User | null, onMatch: (partner: Partner) =>
       console.error("No user provided to joinQueue");
       return;
     }
-    
+    await cleanUpStaleSessions(); 
     console.log("[MATCH] Starting matchmaking for:", user.name);
     
 // Check if already in a session and handle stale sessions
@@ -276,14 +276,16 @@ const quitSession = async (sessionId?: string) => {
         // Create match atomically within transaction
         const newSessionRef = doc(collection(db, 'sessions'));
         
-        transaction.set(newSessionRef, {
-          user1: { id: user.id, name: user.name },
-          user2: { id: partnerData.userId, name: partnerData.name },
-          participants: [user.id, partnerData.userId],
-          config: config,
-          status: 'active',
-          createdAt: serverTimestamp()
-        });
+       transaction.set(newSessionRef, {
+  user1: { id: user.id, name: user.name },
+  user2: { id: partnerData.userId, name: partnerData.name },
+  participants: [user.id, partnerData.userId],
+  config: config,
+  status: 'active',
+  started: false, // NEW
+  createdAt: serverTimestamp()
+});
+
 
         transaction.delete(myDocRef);
         transaction.delete(partnerDocRef);
@@ -327,6 +329,9 @@ const quitSession = async (sessionId?: string) => {
       if (hasMatched.current) return;
 
       const partnerInfo = session.user1.id === user.id ? session.user2 : session.user1;
+// mark session as started
+const sessionRef = doc(db, 'sessions', change.doc.id);
+await setDoc(sessionRef, { started: true }, { merge: true });
 
       console.log("[MATCH] Session detected!", doc.id);
 
@@ -353,6 +358,25 @@ const quitSession = async (sessionId?: string) => {
   return unsubscribe;
 };
 
+const cleanUpStaleSessions = async () => {
+  const q = query(
+    collection(db, 'sessions'),
+    where('status', '==', 'active'),
+    where('started', '==', false)
+  );
+
+  const snapshot = await getDocs(q);
+  const now = Date.now();
+
+  snapshot.forEach(async (docSnap) => {
+    const data = docSnap.data();
+    const createdAt = (data.createdAt as Timestamp)?.toMillis() || 0;
+
+    if (now - createdAt > 60 * 1000) { // 1 min timeout
+      await setDoc(doc(db, 'sessions', docSnap.id), { status: 'ended' }, { merge: true });
+    }
+  });
+};
 
   return { status, joinQueue, cancelSearch, error };
 };

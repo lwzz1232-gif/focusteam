@@ -15,10 +15,12 @@ interface LiveSessionProps {
   user: User;
   partner: Partner;
   config: SessionConfig;
+   sessionId: string; 
   onEndSession: () => void;
 }
 
-export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config, onEndSession }) => {
+export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config, sessionId, onEndSession }) => {
+  
   const isTest = config.duration === SessionDuration.TEST;
   const [phase, setPhase] = useState<SessionPhase>(SessionPhase.ICEBREAKER);
   const [timeLeft, setTimeLeft] = useState(isTest ? 30 : config.preTalkMinutes * 60); 

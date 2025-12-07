@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  getFirestore,
   collection,
   doc,
   setDoc,
@@ -14,7 +13,6 @@ import {
   onSnapshot,
   serverTimestamp,
   Timestamp,
-  updateDoc,
 } from 'firebase/firestore';
 import { db } from '../utils/firebaseConfig';
 import type { User, Partner, SessionConfig, SessionType } from '../types';
@@ -38,34 +36,36 @@ type UseMatchmakingReturn = {
   error?: string;
 };
 
-export function useMatchmaking(user: User | null, onMatch?: (partner: Partner, sessionId: string) => void): UseMatchmakingReturn {
+export function useMatchmaking(
+  user: User | null, 
+  onMatch?: (partner: Partner, sessionId: string) => void
+): UseMatchmakingReturn {
   const [status, setStatus] = useState<'IDLE' | 'SEARCHING' | 'MATCHED'>('IDLE');
   const [error, setError] = useState<string | undefined>(undefined);
 
-  // Keep refs for cleanup and ensuring callbacks run once
+  // Refs for cleanup and state management
   const onMatchRef = useRef<((partner: Partner, sessionId: string) => void) | undefined>(onMatch);
   const sessionListenerUnsubRef = useRef<(() => void) | null>(null);
   const cleanupIntervalRef = useRef<NodeJS.Timeout | null>(null);
-const matchRetryIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const matchRetryIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const matchedRef = useRef<boolean>(false);
   const isMountedRef = useRef<boolean>(true);
   const currentSessionIdRef = useRef<string | null>(null);
   const activeConfigRef = useRef<SessionConfig | null>(null);
-  const matchInProgressRef = useRef<boolean>(false); // <-- ADD THIS
-
+  const matchInProgressRef = useRef<boolean>(false);
 
   // Update callback ref when onMatch changes
   useEffect(() => {
     onMatchRef.current = onMatch;
   }, [onMatch]);
 
-  // Cleanup on unmount and mount
+  // Cleanup on mount and unmount
   useEffect(() => {
     isMountedRef.current = true;
 
-    // Always run cleanup on mount once
+    // Run initial cleanup on mount
     if (user) {
-      cleanupExpiredSessions(). catch((e) => console.error('[STARTUP] Initial cleanup error:', e));
+      cleanupExpiredSessions().catch((e) => console.error('[STARTUP] Initial cleanup error:', e));
     }
 
     // Schedule periodic cleanup
@@ -82,20 +82,20 @@ const matchRetryIntervalRef = useRef<NodeJS.Timeout | null>(null);
         clearInterval(cleanupIntervalRef.current);
         cleanupIntervalRef.current = null;
       }
-      if (matchRetryIntervalRef. current) {
+      if (matchRetryIntervalRef.current) {
         clearInterval(matchRetryIntervalRef.current);
         matchRetryIntervalRef.current = null;
       }
 
       // Detach session listener
       if (sessionListenerUnsubRef.current) {
-        sessionListenerUnsubRef. current();
+        sessionListenerUnsubRef.current();
         sessionListenerUnsubRef.current = null;
       }
 
       // Best-effort cleanup of pending things for this user
       if (user) {
-        forceCleanupUserPending(user.id). catch(() => {});
+        forceCleanupUserPending(user.id).catch(() => {});
       }
     };
   }, [user]);
@@ -106,7 +106,6 @@ const matchRetryIntervalRef = useRef<NodeJS.Timeout | null>(null);
       const sessionsColl = collection(db, SESSIONS_COLLECTION);
       const threshold = Timestamp.fromDate(new Date(Date.now() - SESSION_EXPIRATION_MS));
       
-      // Delete ANY session older than threshold (regardless of started status)
       const q = query(
         sessionsColl,
         where('createdAt', '<', threshold)
@@ -136,7 +135,6 @@ const matchRetryIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const hasActiveSession = useCallback(async (userId: string): Promise<boolean> => {
     try {
       const sessionsColl = collection(db, SESSIONS_COLLECTION);
-      // Only consider sessions that started AND are not expired
       const recentThreshold = Timestamp.fromDate(new Date(Date.now() - SESSION_EXPIRATION_MS));
       
       const q = query(
@@ -148,7 +146,7 @@ const matchRetryIntervalRef = useRef<NodeJS.Timeout | null>(null);
       );
       const snap = await getDocs(q);
       
-      if (! snap.empty) {
+      if (!snap.empty) {
         console.warn(`[ACTIVE-CHECK] User ${userId} has active session: ${snap.docs[0].id}`);
         return true;
       }
@@ -200,9 +198,11 @@ const matchRetryIntervalRef = useRef<NodeJS.Timeout | null>(null);
     }
   }, []);
 
-  // Internal: set up listener for a given session doc.  Ensures onMatch is fired once. 
+  // Attach listener to session document - fires onMatch when session starts
   const attachSessionListener = useCallback(
     (sessionId: string, userId: string, localOnMatch?: (partner: Partner, sessionId: string) => void) => {
+      console.log(`[LISTENER] Attaching to session: ${sessionId} for user: ${userId}`);
+      
       // Detach previous listener
       if (sessionListenerUnsubRef.current) {
         sessionListenerUnsubRef.current();
@@ -218,20 +218,20 @@ const matchRetryIntervalRef = useRef<NodeJS.Timeout | null>(null);
       const unsub = onSnapshot(
         sRef,
         (snap) => {
-          // Session was deleted
           if (!snap.exists()) {
             console.log(`[LISTENER] Session ${sessionId} was deleted`);
             return;
           }
 
           const data = snap.data() as any;
+          console.log(`[LISTENER] Session update - started: ${data.started}, participants: ${data.participants?.length}`);
 
           // If session already started, trigger match callback (only once)
-          if (data. started === true && ! matchedRef.current) {
+          if (data.started === true && !matchedRef.current) {
             matchedRef.current = true;
-            console.log(`[LISTENER] Session ${sessionId} started! `);
+            console.log(`[LISTENER] Session ${sessionId} started!`);
 
-            if (! isMountedRef.current) {
+            if (!isMountedRef.current) {
               console.warn('[LISTENER] Component unmounted, skipping match callback');
               return;
             }
@@ -245,12 +245,19 @@ const matchRetryIntervalRef = useRef<NodeJS.Timeout | null>(null);
                 console.log(`[LISTENER] Found partner:`, partnerInfo);
                 if (isMountedRef.current) {
                   setStatus('MATCHED');
+                  
+                  // Stop retry interval when matched
+                  if (matchRetryIntervalRef.current) {
+                    clearInterval(matchRetryIntervalRef.current);
+                    matchRetryIntervalRef.current = null;
+                  }
+                  
                   if (localOnMatch) {
                     localOnMatch(
                       {
                         id: partnerInfo.userId,
                         name: partnerInfo.displayName || 'Partner',
-                        type: data.config?. type || 'ANY',
+                        type: data.config?.type || 'ANY',
                       } as Partner,
                       snap.id
                     );
@@ -265,7 +272,7 @@ const matchRetryIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
           // If session not started but has two participants, try to mark started=true via transaction
           if (data.started === false && Array.isArray(data.participants) && data.participants.length >= 2) {
-            console.log(`[LISTENER] Session ${sessionId} has 2 participants, attempting to start... `);
+            console.log(`[LISTENER] Session ${sessionId} has 2 participants, attempting to start...`);
 
             // Fire-and-forget: attempt to set started=true if still false
             (async () => {
@@ -286,14 +293,14 @@ const matchRetryIntervalRef = useRef<NodeJS.Timeout | null>(null);
                   console.log('[TRANSACTION] Marked session as started');
                 });
               } catch (err) {
-                console. warn('[TRANSACTION] Failed to mark session started', err);
+                console.warn('[TRANSACTION] Failed to mark session started', err);
               }
             })();
           }
         },
         (error) => {
           console.error('[LISTENER] onSnapshot error', error);
-          if (isMountedRef. current) {
+          if (isMountedRef.current) {
             setError(`Session listener error: ${error.message}`);
           }
         }
@@ -307,16 +314,22 @@ const matchRetryIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Attempt to find and match with a partner
   const attemptMatch = useCallback(
-  async (userId: string, config: SessionConfig) => {
-    if (!isMountedRef.current || matchedRef.current) return; // ADD THIS LINE
-    if (matchInProgressRef.current) {
-  console.log('[MATCH] Attempt blocked: previous attempt still running');
-  return;
-}
-matchInProgressRef.current = true;
+    async (userId: string, config: SessionConfig) => {
+      if (!isMountedRef.current || matchedRef.current) {
+        console.log('[MATCH] Skipping - component unmounted or already matched');
+        return;
+      }
+      
+      if (matchInProgressRef.current) {
+        console.log('[MATCH] Attempt blocked: previous attempt still running');
+        return;
+      }
+      
+      matchInProgressRef.current = true;
+      console.log('[MATCH] Starting match attempt for user:', userId);
 
-    try {
-      const queueColl = collection(db, QUEUE_COLLECTION);
+      try {
+        const queueColl = collection(db, QUEUE_COLLECTION);
         const sessionsColl = collection(db, SESSIONS_COLLECTION);
 
         // Try to find a partner in queue that is not this user
@@ -330,6 +343,7 @@ matchInProgressRef.current = true;
 
         if (partnerSnap.empty) {
           console.log(`[MATCH] No partner found in queue yet for user ${userId}`);
+          matchInProgressRef.current = false;
           return;
         }
 
@@ -355,7 +369,7 @@ matchInProgressRef.current = true;
             throw new Error('My queue entry disappeared - another match may have occurred');
           }
 
-          if (! partnerQueueSnap.exists()) {
+          if (!partnerQueueSnap.exists()) {
             console.warn('[TRANSACTION] Partner queue entry is gone, aborting match');
             throw new Error('Partner queue entry disappeared - they may have matched already');
           }
@@ -364,18 +378,18 @@ matchInProgressRef.current = true;
           const currentUserName = myData.userDisplayName;
 
           const sessionPayload = {
-            type: (config.type as SessionType) ??  'ANY',
+            type: (config.type as SessionType) ?? 'ANY',
             config,
-            participants: [userId, partnerId], // Just the IDs for Firestore rules
-            participantInfo: [ // Full info stored separately
+            participants: [userId, partnerId],
+            participantInfo: [
               {
                 userId: userId,
                 displayName: currentUserName || 'User',
-                photoURL: myData.userPhotoURL ??  '',
+                photoURL: myData.userPhotoURL ?? '',
               },
               {
                 userId: partnerId,
-                displayName: partnerData.userDisplayName ??  'Partner',
+                displayName: partnerData.userDisplayName ?? 'Partner',
                 photoURL: partnerData.userPhotoURL ?? '',
               },
             ],
@@ -392,32 +406,35 @@ matchInProgressRef.current = true;
         });
 
         // Attach listener so onMatch will be triggered when started flips to true
+        console.log(`[MATCH] Successfully matched! Attaching listener to session: ${sessionRef.id}`);
         attachSessionListener(sessionRef.id, userId, onMatchRef.current);
-
-        console.log(`[MATCH] Successfully matched!  Session: ${sessionRef.id}`);
-      // Stop retry interval since match succeeded
-try {
-  const sessions = collection(db, SESSIONS_COLLECTION);
-  const q = query(
-    sessions,
-    where('participants', 'array-contains', userId),
-    where('started', '==', true), // already started
-    orderBy('createdAt', 'desc'),
-    limit(1)
-  );
-  const snap = await getDocs(q);
-
-  if (!snap.empty) {
-    const sessionDoc = snap.docs[0];
-    console.log("[MATCH] Attaching listener to existing session:", sessionDoc.id);
-    attachSessionListener(sessionDoc.id, userId, onMatchRef.current);
-  }
-      } catch (err: any) {
-  // If transaction failed due to race, don't block re-matching
-  console.warn('[MATCH] Match attempt failed, will retry', err);
-
-      } finally {
+        
         matchInProgressRef.current = false;
+        
+      } catch (err: any) {
+        console.warn('[MATCH] Match attempt failed, will retry', err);
+        matchInProgressRef.current = false;
+        
+        // Check if there's an existing session we should attach to
+        try {
+          const sessions = collection(db, SESSIONS_COLLECTION);
+          const q = query(
+            sessions,
+            where('participants', 'array-contains', userId),
+            where('started', '==', false),
+            orderBy('createdAt', 'desc'),
+            limit(1)
+          );
+          const snap = await getDocs(q);
+
+          if (!snap.empty) {
+            const sessionDoc = snap.docs[0];
+            console.log("[MATCH] Found existing pending session, attaching listener:", sessionDoc.id);
+            attachSessionListener(sessionDoc.id, userId, onMatchRef.current);
+          }
+        } catch (existingSessionErr) {
+          console.error('[MATCH] Error checking for existing session:', existingSessionErr);
+        }
       }
     },
     [attachSessionListener]
@@ -431,21 +448,20 @@ try {
         return;
       }
 
-      if (! isMountedRef.current) {
+      if (!isMountedRef.current) {
         console.warn('[JOIN] Component not mounted, aborting joinQueue');
         return;
       }
 
+      console.log(`[JOIN] Starting matchmaking for user: ${user.id}`);
       setError(undefined);
       setStatus('SEARCHING');
 
       try {
-        console.log(`[JOIN] Starting matchmaking for user: ${user.id}`);
-
         // Check if user already has a TRULY active session
-        const hasActive = await hasActiveSession(user. id);
+        const hasActive = await hasActiveSession(user.id);
         if (hasActive) {
-          setError("You're already in an active session!  Please wait for it to expire or complete it first.");
+          setError("You're already in an active session! Please wait for it to expire or complete it first.");
           setStatus('IDLE');
           console.warn('[JOIN] User already has active session');
           return;
@@ -459,7 +475,7 @@ try {
         const myQueueRef = doc(queueColl, user.id);
         const queuePayload = {
           userId: user.id,
-          userDisplayName: user.name ??  '',
+          userDisplayName: user.name ?? '',
           userPhotoURL: user.avatar ?? '',
           config,
           createdAt: serverTimestamp(),
@@ -471,34 +487,42 @@ try {
         activeConfigRef.current = config;
         matchedRef.current = false;
 
-        // Start matching attempts
-      matchRetryIntervalRef.current = setInterval(() => {
-  if (isMountedRef.current && status === 'SEARCHING' && activeConfigRef.current && !matchedRef.current) {
-    console.log('[RETRY] Attempting match again...');
-    attemptMatch(user.id, activeConfigRef.current).catch((err) =>
-      console.error('[RETRY] Match attempt error', err)
-    );
-  } else if (matchedRef.current) {
-    // Stop retrying once matched
-    if (matchRetryIntervalRef.current) {
-      clearInterval(matchRetryIntervalRef.current);
-      matchRetryIntervalRef.current = null;
-    }
-  }
-}, MATCH_RETRY_INTERVAL_MS);
+        // Immediately try to match once
+        await attemptMatch(user.id, config);
+
+        // Start retry interval for continuous matching attempts
+        if (matchRetryIntervalRef.current) {
+          clearInterval(matchRetryIntervalRef.current);
+        }
+        
+        matchRetryIntervalRef.current = setInterval(() => {
+          if (isMountedRef.current && !matchedRef.current && activeConfigRef.current) {
+            console.log('[RETRY] Attempting match again...');
+            attemptMatch(user.id, activeConfigRef.current).catch((err) =>
+              console.error('[RETRY] Match attempt error', err)
+            );
+          } else if (matchedRef.current) {
+            // Stop retrying once matched
+            if (matchRetryIntervalRef.current) {
+              clearInterval(matchRetryIntervalRef.current);
+              matchRetryIntervalRef.current = null;
+            }
+          }
+        }, MATCH_RETRY_INTERVAL_MS);
+        
       } catch (err: any) {
         console.error('[JOIN] joinQueue error', err);
         if (isMountedRef.current) {
-          setError(err?. message ??  String(err));
+          setError(err?.message ?? String(err));
           setStatus('IDLE');
         }
       }
     },
-    [user, attemptMatch, hasActiveSession, forceCleanupUserPending, status]
+    [user, attemptMatch, hasActiveSession, forceCleanupUserPending]
   );
 
   const cancelSearch = useCallback(async () => {
-    if (! user) return;
+    if (!user) return;
 
     console.log(`[CANCEL] Canceling search for user: ${user.id}`);
     setError(undefined);

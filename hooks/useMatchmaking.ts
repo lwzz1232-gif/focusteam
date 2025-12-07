@@ -356,87 +356,110 @@ export function useMatchmaking(
 
         console.log(`[MATCH] Found potential partner: ${partnerId}, total in queue: ${allQueueSnap.size}`);
 
+        // First, check if a session already exists between these two users
+        const existingSessionQuery = query(
+          sessionsColl,
+          where('participants', 'in', [[userId, partnerId], [partnerId, userId]]),
+          where('started', '==', false),
+          limit(1)
+        );
+        const existingSessionSnap = await getDocs(existingSessionQuery);
+        
+        if (!existingSessionSnap.empty) {
+          // Session already exists! Just attach listener
+          const existingSessionId = existingSessionSnap.docs[0].id;
+          console.log(`[MATCH] Found existing session: ${existingSessionId}, attaching listener`);
+          attachSessionListener(existingSessionId, userId, onMatchRef.current);
+          matchInProgressRef.current = false;
+          return;
+        }
+
         // Run transaction: confirm both queue docs exist, create session, delete both queue docs
         const myQueueRef = doc(queueColl, userId);
         const partnerQueueRef = doc(queueColl, partnerId);
         const sessionRef = doc(sessionsColl); // Auto-generated ID
-
-        await runTransaction(db, async (tx) => {
-          const myQueueSnap = await tx.get(myQueueRef);
-          const partnerQueueSnap = await tx.get(partnerQueueRef);
-
-          // If partner or me is gone, abort the transaction
-          if (!myQueueSnap.exists()) {
-            console.warn('[TRANSACTION] My queue entry is gone, aborting match');
-            throw new Error('My queue entry disappeared - another match may have occurred');
-          }
-
-          if (!partnerQueueSnap.exists()) {
-            console.warn('[TRANSACTION] Partner queue entry is gone, aborting match');
-            throw new Error('Partner queue entry disappeared - they may have matched already');
-          }
-
-          const myData = myQueueSnap.data() as any;
-          const currentUserName = myData.userDisplayName;
-
-          const sessionPayload = {
-            type: (config.type as SessionType) ?? 'ANY',
-            config,
-            participants: [userId, partnerId],
-            participantInfo: [
-              {
-                userId: userId,
-                displayName: currentUserName || 'User',
-                photoURL: myData.userPhotoURL ?? '',
-              },
-              {
-                userId: partnerId,
-                displayName: partnerData.userDisplayName ?? 'Partner',
-                photoURL: partnerData.userPhotoURL ?? '',
-              },
-            ],
-            createdAt: serverTimestamp(),
-            started: false,
-          };
-
-          // All checks passed, create session and delete both queue entries atomically
-          tx.set(sessionRef, sessionPayload);
-          tx.delete(myQueueRef);
-          tx.delete(partnerQueueRef);
-
-          console.log(`[TRANSACTION] Created session ${sessionRef.id} between ${userId} and ${partnerId}`);
-        });
-
-        // Attach listener so onMatch will be triggered when started flips to true
-        console.log(`[MATCH] Successfully matched! Attaching listener to session: ${sessionRef.id}`);
-        attachSessionListener(sessionRef.id, userId, onMatchRef.current);
         
-        matchInProgressRef.current = false;
-        
-      } catch (err: any) {
-        console.warn('[MATCH] Match attempt failed, will retry', err);
-        matchInProgressRef.current = false;
-        
-        // Check if there's an existing session we should attach to
+        let sessionCreated = false;
+        let createdSessionId = '';
+
         try {
-          const sessions = collection(db, SESSIONS_COLLECTION);
-          const q = query(
-            sessions,
+          await runTransaction(db, async (tx) => {
+            const myQueueSnap = await tx.get(myQueueRef);
+            const partnerQueueSnap = await tx.get(partnerQueueRef);
+
+            // If either queue entry is gone, check for existing session and abort
+            if (!myQueueSnap.exists() || !partnerQueueSnap.exists()) {
+              console.warn('[TRANSACTION] Queue entry missing - likely race condition, will check for existing session');
+              throw new Error('Queue entry missing - checking for existing session');
+            }
+
+            const myData = myQueueSnap.data() as any;
+            const currentUserName = myData.userDisplayName;
+
+            const sessionPayload = {
+              type: (config.type as SessionType) ?? 'ANY',
+              config,
+              participants: [userId, partnerId],
+              participantInfo: [
+                {
+                  userId: userId,
+                  displayName: currentUserName || 'User',
+                  photoURL: myData.userPhotoURL ?? '',
+                },
+                {
+                  userId: partnerId,
+                  displayName: partnerData.userDisplayName ?? 'Partner',
+                  photoURL: partnerData.userPhotoURL ?? '',
+                },
+              ],
+              createdAt: serverTimestamp(),
+              started: false,
+            };
+
+            // All checks passed, create session and delete both queue entries atomically
+            tx.set(sessionRef, sessionPayload);
+            tx.delete(myQueueRef);
+            tx.delete(partnerQueueRef);
+
+            console.log(`[TRANSACTION] Created session ${sessionRef.id} between ${userId} and ${partnerId}`);
+            sessionCreated = true;
+            createdSessionId = sessionRef.id;
+          });
+
+          if (sessionCreated) {
+            // Attach listener so onMatch will be triggered when started flips to true
+            console.log(`[MATCH] Successfully matched! Attaching listener to session: ${createdSessionId}`);
+            attachSessionListener(createdSessionId, userId, onMatchRef.current);
+            matchInProgressRef.current = false;
+          }
+        } catch (transactionError: any) {
+          console.warn('[TRANSACTION] Failed:', transactionError.message);
+          
+          // Transaction failed - likely because other user already created session
+          // Search for the session that was created
+          const retrySessionQuery = query(
+            sessionsColl,
             where('participants', 'array-contains', userId),
             where('started', '==', false),
             orderBy('createdAt', 'desc'),
             limit(1)
           );
-          const snap = await getDocs(q);
-
-          if (!snap.empty) {
-            const sessionDoc = snap.docs[0];
-            console.log("[MATCH] Found existing pending session, attaching listener:", sessionDoc.id);
-            attachSessionListener(sessionDoc.id, userId, onMatchRef.current);
+          const retrySessionSnap = await getDocs(retrySessionQuery);
+          
+          if (!retrySessionSnap.empty) {
+            const foundSessionId = retrySessionSnap.docs[0].id;
+            console.log(`[MATCH] Found session created by partner: ${foundSessionId}, attaching listener`);
+            attachSessionListener(foundSessionId, userId, onMatchRef.current);
+            matchInProgressRef.current = false;
+          } else {
+            console.warn('[MATCH] No session found after transaction failure, will retry');
+            matchInProgressRef.current = false;
           }
-        } catch (existingSessionErr) {
-          console.error('[MATCH] Error checking for existing session:', existingSessionErr);
         }
+        
+      } catch (err: any) {
+        console.warn('[MATCH] Match attempt failed:', err.message);
+        matchInProgressRef.current = false;
       }
     },
     [attachSessionListener]

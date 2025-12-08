@@ -15,7 +15,7 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import { db } from '../utils/firebaseConfig';
-import type { User, Partner, SessionConfig, SessionType } from '../types';
+import type { User, Partner, SessionConfig } from '../types';
 
 const QUEUE_COLLECTION = 'queue';
 const SESSIONS_COLLECTION = 'sessions';
@@ -68,7 +68,6 @@ export function useMatchmaking(
     return () => {
       isMountedRef.current = false;
       stopAllListeners();
-      // On unmount, if we were searching, clean up.
       if (user) forceCleanupUserPending(user.id).catch(() => {});
     };
   }, [user]);
@@ -123,7 +122,6 @@ export function useMatchmaking(
 
       console.log(`[LISTENER] Joining session: ${sessionId}`);
       
-      // Stop queue listeners and retries immediately
       if (matchRetryIntervalRef.current) clearInterval(matchRetryIntervalRef.current);
       if (queueListenerUnsubRef.current) queueListenerUnsubRef.current();
 
@@ -138,7 +136,6 @@ export function useMatchmaking(
           if (!snap.exists()) return;
           const data = snap.data() as any;
 
-          // 1. MATCH SUCCESS
           if (data.started === true && !matchedRef.current) {
             matchedRef.current = true;
             
@@ -158,7 +155,6 @@ export function useMatchmaking(
             return;
           }
 
-          // 2. FAILSAFE: If 2 people are here but it hasn't started, START IT.
           if (data.started === false && data.participants?.length >= 2) {
              runTransaction(db, async (tx) => {
                 const sDoc = await tx.get(snap.ref);
@@ -181,7 +177,6 @@ export function useMatchmaking(
       matchInProgressRef.current = true;
 
       try {
-        // 1. Find a candidate
         const q = query(collection(db, QUEUE_COLLECTION), orderBy('createdAt', 'asc'), limit(10));
         const snapshot = await getDocs(q);
         const partnerDoc = snapshot.docs.find(d => d.id !== userId);
@@ -193,52 +188,37 @@ export function useMatchmaking(
 
         const partnerId = partnerDoc.data().userId;
 
-        // 2. Deterministic ID (Alphabetical)
+        // --- NEW FIX: UNIQUE ID GENERATION ---
+        // We still sort IDs so we have a consistent base
         const sortedIds = [userId, partnerId].sort((a, b) => a.localeCompare(b));
-        const deterministicSessionId = `${sortedIds[0]}_${sortedIds[1]}`;
+        // BUT we append a timestamp to ensure a FRESH room every time
+        const uniqueSessionId = `${sortedIds[0]}_${sortedIds[1]}_${Date.now()}`;
 
         await runTransaction(db, async (tx) => {
-          const sessionRef = doc(db, SESSIONS_COLLECTION, deterministicSessionId);
-          const sessionSnap = await tx.get(sessionRef);
-
-          // ZOMBIE CHECK: If session exists and is OLD/STARTED, we overwrite it.
-          // If it exists and is NEW/NOT-STARTED, we join it.
-          let shouldOverwrite = true;
-          if (sessionSnap.exists()) {
-             const existing = sessionSnap.data();
-             if (existing.started === false) {
-               shouldOverwrite = false; // Join existing fresh session
-             }
-             // If started===true, we assume it's a zombie from yesterday and overwrite
-          }
-
           const myQueueRef = doc(db, QUEUE_COLLECTION, userId);
           const partnerQueueRef = doc(db, QUEUE_COLLECTION, partnerId);
           
           const [myQ, partnerQ] = await Promise.all([tx.get(myQueueRef), tx.get(partnerQueueRef)]);
           
-          // Verify both users are still in queue
           if (!myQ.exists() || !partnerQ.exists()) throw new Error('RETRY');
 
-          // CREATE/UPDATE SESSION
-          if (shouldOverwrite) {
-            tx.set(sessionRef, {
-              type: config.type || 'ANY',
-              config,
-              participants: [userId, partnerId],
-              participantInfo: [
-                { userId: userId, displayName: myQ.data().userDisplayName, photoURL: myQ.data().userPhotoURL },
-                { userId: partnerId, displayName: partnerQ.data().userDisplayName, photoURL: partnerQ.data().userPhotoURL },
-              ],
-              createdAt: serverTimestamp(),
-              started: false,
-            });
-          }
+          // Create the FRESH session
+          const sessionRef = doc(db, SESSIONS_COLLECTION, uniqueSessionId);
+          tx.set(sessionRef, {
+            type: config.type || 'ANY',
+            config,
+            participants: [userId, partnerId],
+            participantInfo: [
+              { userId: userId, displayName: myQ.data().userDisplayName, photoURL: myQ.data().userPhotoURL },
+              { userId: partnerId, displayName: partnerQ.data().userDisplayName, photoURL: partnerQ.data().userPhotoURL },
+            ],
+            createdAt: serverTimestamp(),
+            started: false,
+          });
 
-          // SIGNAL: UPDATE QUEUES instead of deleting them
-          // This tells both clients "Here is your ID, go join it"
-          tx.update(myQueueRef, { sessionId: deterministicSessionId });
-          tx.update(partnerQueueRef, { sessionId: deterministicSessionId });
+          // Invite partner to this specific Unique ID
+          tx.update(myQueueRef, { sessionId: uniqueSessionId });
+          tx.update(partnerQueueRef, { sessionId: uniqueSessionId });
         });
 
       } catch (err: any) {
@@ -271,37 +251,34 @@ export function useMatchmaking(
 
         const myQueueRef = doc(db, QUEUE_COLLECTION, user.id);
         
-        // 1. Create Queue Ticket
         await setDoc(myQueueRef, {
           userId: user.id,
           userDisplayName: user.name ?? 'Anonymous',
           userPhotoURL: user.avatar ?? '',
           config,
           createdAt: serverTimestamp(),
-          sessionId: null // Initial state
+          sessionId: null
         });
 
-        // 2. LISTEN TO OWN TICKET (The Fix)
         if (queueListenerUnsubRef.current) queueListenerUnsubRef.current();
         
+        // Listen for the INVITE (sessionId)
         queueListenerUnsubRef.current = onSnapshot(myQueueRef, (snap) => {
-          if (!snap.exists()) return; // Should not happen unless cancelled
+          if (!snap.exists()) return;
           
           const data = snap.data();
           
-          // IF WE HAVE BEEN ASSIGNED A SESSION ID
           if (data?.sessionId && !matchedRef.current) {
-             console.log('[QUEUE] Match signal received!', data.sessionId);
+             console.log('[QUEUE] Received Invite to:', data.sessionId);
              
-             // 1. Attach to session
+             // Join the room
              attachSessionListener(data.sessionId, user.id, onMatchRef.current);
              
-             // 2. Clean up my queue ticket
+             // Clean up queue ticket
              deleteDoc(myQueueRef).catch(console.error);
           }
         });
 
-        // 3. Start Search Loop
         await attemptMatch(user.id, config);
         
         if (matchRetryIntervalRef.current) clearInterval(matchRetryIntervalRef.current);

@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Partner, SessionPhase, User, SessionConfig, SessionDuration, TodoItem } from '../types';
 import { Button } from '../components/Button';
 import { generateIcebreaker } from '../services/geminiService';
-// Added Flag, X
 import { Mic, MicOff, Video, VideoOff, Sparkles, LogOut, Lock, User as UserIcon, MessageSquare, ListChecks, ThumbsUp, Heart, Zap, Smile, Flag, X } from 'lucide-react';
 import { ChatWindow } from '../components/ChatWindow';
 import { TaskBoard } from '../components/TaskBoard';
@@ -183,10 +182,23 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       }
   };
 
-  // --- MEDIA ---
+  // --- MEDIA HANDLING (FIXED) ---
   useEffect(() => {
-      if (myVideoRef.current && localStream) myVideoRef.current.srcObject = localStream;
-      if (partnerVideoRef.current && remoteStream) partnerVideoRef.current.srcObject = remoteStream;
+      // 1. Handle Local Stream
+      if (myVideoRef.current && localStream) {
+          myVideoRef.current.srcObject = localStream;
+      }
+      
+      // 2. Handle Remote Stream (FIXED: Added explicit play and error handling)
+      if (partnerVideoRef.current && remoteStream) {
+          console.log("Attaching remote stream to video element:", remoteStream.id);
+          partnerVideoRef.current.srcObject = remoteStream;
+          
+          // Force play if autoplay fails
+          partnerVideoRef.current.play().catch(e => {
+              console.error("Autoplay failed, attempting manual play", e);
+          });
+      }
   }, [localStream, remoteStream]);
 
   useEffect(() => {
@@ -281,7 +293,14 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       {/* --- LAYER 2: PARTNER VIDEO (FULL SCREEN) - UPDATED WITH SCALE EFFECT --- */}
       <div className={`absolute inset-0 z-10 transition-all duration-1000 ease-in-out ${phase === SessionPhase.FOCUS ? 'scale-95 rounded-3xl overflow-hidden shadow-2xl border border-white/5' : ''}`}>
           {remoteStream ? (
-              <video ref={partnerVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
+              <video 
+                ref={partnerVideoRef} 
+                autoPlay 
+                playsInline 
+                // ADDED: ensures video plays when data arrives
+                onLoadedMetadata={(e) => (e.target as HTMLVideoElement).play()}
+                className="w-full h-full object-cover" 
+              />
           ) : (
               <div className="flex flex-col items-center justify-center h-full gap-4">
                   <div className="relative">

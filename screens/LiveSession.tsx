@@ -37,9 +37,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [icebreaker, setIcebreaker] = useState<string | null>(null);
   const [isLoadingIcebreaker, setIsLoadingIcebreaker] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [unreadChatCount, setUnreadChatCount] = useState(0); // Defined here
   const [isTaskBoardOpen, setIsTaskBoardOpen] = useState(false);
-  const [showUI, setShowUI] = useState(true); // Zen Mode
+  const [showUI, setShowUI] = useState(true); 
   const [floatingEmojis, setFloatingEmojis] = useState<{id: number, emoji: string, left: number}[]>([]); 
 
   // Draggable Self-Video State
@@ -239,7 +239,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   };
 
   return (
-    // FIX 1: changed from h-screen w-screen to absolute inset-0 to fit inside Layout
     <div className="absolute inset-0 bg-black overflow-hidden select-none">
       
       {phase === SessionPhase.COMPLETED && (
@@ -248,10 +247,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           </div>
       )}
 
-      {/* --- LAYER 1: AMBIENT GLOW (Z-0) --- */}
       <div className={`absolute inset-0 bg-gradient-to-b ${getPhaseColor()} transition-colors duration-[2000ms] pointer-events-none z-0`}></div>
 
-      {/* --- LAYER 2: PARTNER VIDEO (Z-10) --- */}
       <div className="absolute inset-0 z-10">
           {remoteStream ? (
               <video ref={partnerVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
@@ -264,11 +261,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                   <span className="text-slate-500 font-medium animate-pulse">Establishing link...</span>
               </div>
           )}
-          {/* Phase Overlay */}
           <div className={`absolute inset-0 bg-black/40 transition-opacity duration-1000 pointer-events-none ${phase === SessionPhase.FOCUS ? 'opacity-60 backdrop-grayscale-[30%]' : 'opacity-0'}`}></div>
       </div>
 
-      {/* --- LAYER 3: FLOATING REACTIONS (Z-20) --- */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden z-20">
           {floatingEmojis.map(e => (
               <div 
@@ -281,7 +276,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           ))}
       </div>
 
-      {/* --- LAYER 4: SELF VIDEO PIP (Z-30) --- */}
       <div 
         onMouseDown={handleMouseDown}
         style={{ transform: `translate(${selfPos.x}px, ${selfPos.y}px)` }}
@@ -294,7 +288,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           </div>
       </div>
 
-      {/* --- LAYER 5: UI CONTROLS (Z-40) --- */}
       <div className={`absolute inset-0 pointer-events-none z-40 transition-opacity duration-500 ${showUI ? 'opacity-100' : 'opacity-0'}`}>
         
         <div className="absolute top-6 left-0 right-0 flex justify-center pointer-events-none">
@@ -344,7 +337,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
                 <button onClick={() => { setIsChatOpen(!isChatOpen); setUnreadChatCount(0); }} className="w-12 h-12 rounded-full flex items-center justify-center bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 relative">
                     <MessageSquare size={20} />
-                    {unreadCount > 0 && <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-slate-900"></span>}
+                    {unreadChatCount > 0 && <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-slate-900"></span>}
                 </button>
 
                 <button onClick={() => setIsTaskBoardOpen(!isTaskBoardOpen)} className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${isTaskBoardOpen ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}>
@@ -363,3 +356,4 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     </div>
   );
 };
+export default LiveSession;

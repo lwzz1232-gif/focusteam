@@ -400,10 +400,11 @@ export function useMatchmaking(
           }
         }
 
-        // Create a deterministic session ID based on both user IDs (sorted)
-        // This ensures both users will try to create the exact same session ID
-        const sortedIds = [userId, partnerId].sort();
-        const deterministicSessionId = `${sortedIds[0]}_${sortedIds[1]}_${Date.now()}`;
+       // Create a deterministic session ID based on both user IDs (sorted)
+// This ensures both users will try to create the exact same session ID
+const sortedIds = [userId, partnerId].sort();
+const partnerTimestamp = partnerData.createdAt?.toMillis() || Date.now();
+const deterministicSessionId = `${sortedIds[0]}_${sortedIds[1]}_${partnerTimestamp}`;
         
         // Run transaction: confirm both queue docs exist, create session, delete both queue docs
         const myQueueRef = doc(queueColl, userId);

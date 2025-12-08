@@ -1,26 +1,29 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from '../components/Button';
-import { SessionConfig, Partner, SessionMode, SessionDuration } from '../types';
+import { SessionConfig, Partner, SessionMode } from '../types';
 import { Zap, Timer, CheckCircle2, User, Users, XCircle } from 'lucide-react';
+import { doc, updateDoc, onSnapshot } from 'firebase/firestore';
+import { db } from '../utils/firebaseConfig';
 
 interface NegotiationProps {
   config: SessionConfig;
   partner: Partner;
+  sessionId: string; // NEW: Required for sync
+  userId: string;    // NEW: Required to identify "me"
   onNegotiationComplete: (finalConfig: SessionConfig) => void;
   onSkipMatch: () => void;
 }
 
-export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, onNegotiationComplete, onSkipMatch }) => {
+export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessionId, userId, onNegotiationComplete, onSkipMatch }) => {
   const [step, setStep] = useState<'INPUT' | 'WAITING' | 'REVIEW' | 'AGREED'>('INPUT');
   const [inputTimer, setInputTimer] = useState(15);
   
-  // User choices
+  // My choices
   const [myMode, setMyMode] = useState<SessionMode>(SessionMode.DEEP_WORK);
   const [myPreTalk, setMyPreTalk] = useState(5);
   const [myPostTalk, setMyPostTalk] = useState(5);
 
-  // Partner choices (Simulated)
+  // Partner choices (synced from DB)
   const [partnerMode, setPartnerMode] = useState<SessionMode | null>(null);
   const [partnerPreTalk, setPartnerPreTalk] = useState<number | null>(null);
   const [partnerPostTalk, setPartnerPostTalk] = useState<number | null>(null);
@@ -28,7 +31,7 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, onNeg
   // Final Result
   const [finalConfig, setFinalConfig] = useState<SessionConfig | null>(null);
 
-  // Timer for Input Phase
+  // 1. Timer for Input Phase
   useEffect(() => {
     if (step === 'INPUT') {
       const timer = setInterval(() => {
@@ -44,73 +47,103 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, onNeg
     }
   }, [step]);
 
-  const handleAutoSubmit = () => {
-    // Randomize my preferences if time ran out
-    const randomMode = Math.random() > 0.5 ? SessionMode.DEEP_WORK : SessionMode.POMODORO;
-    const randomPre = Math.floor(Math.random() * 5) + 2;
-    const randomPost = Math.floor(Math.random() * 5) + 2;
+  // 2. LISTEN TO FIRESTORE FOR PARTNER'S CHOICES
+  useEffect(() => {
+    if (!sessionId) return;
     
-    // Only override if not interacting? For MVP we just enforce random to ensure progress
-    setMyMode(randomMode);
-    setMyPreTalk(randomPre);
-    setMyPostTalk(randomPost);
+    const unsub = onSnapshot(doc(db, 'sessions', sessionId), (docSnap) => {
+        if (!docSnap.exists()) return;
+        const data = docSnap.data();
+        
+        // Check for negotiation data
+        const negotiation = data.negotiation || {};
+        
+        // Find partner's data (key is NOT my userId)
+        const partnerKey = Object.keys(negotiation).find(k => k !== userId);
+        
+        if (partnerKey && negotiation[partnerKey]) {
+            const pData = negotiation[partnerKey];
+            setPartnerMode(pData.mode);
+            setPartnerPreTalk(pData.preTalk);
+            setPartnerPostTalk(pData.postTalk);
+        }
+    });
 
-    // Call submit with these new values
-    handleSubmit(randomMode, randomPre, randomPost);
-  };
+    return () => unsub();
+  }, [sessionId, userId]);
 
-  const handleSubmit = (overrideMode?: SessionMode, overridePre?: number, overridePost?: number) => {
+  // 3. CHECK IF BOTH HAVE SUBMITTED -> CALCULATE AGREEMENT
+  useEffect(() => {
+    // Only proceed if we are waiting AND partner data has arrived
+    if (step === 'WAITING' && partnerMode && partnerPreTalk !== null && partnerPostTalk !== null) {
+        
+        // Deterministic Calculation (Same logic on both clients)
+        const agreedPre = Math.ceil((myPreTalk + partnerPreTalk) / 2);
+        const agreedPost = Math.ceil((myPostTalk + partnerPostTalk) / 2);
+        
+        // Conflict Resolution: Default to DEEP_WORK if mismatch, or strict equality
+        const agreedMode = (myMode === partnerMode) ? myMode : SessionMode.DEEP_WORK; 
+
+        const agreedConfig = {
+            ...config,
+            mode: agreedMode,
+            preTalkMinutes: agreedPre,
+            postTalkMinutes: agreedPost
+        };
+
+        setFinalConfig(agreedConfig);
+        setStep('REVIEW');
+    }
+  }, [step, partnerMode, partnerPreTalk, partnerPostTalk, myMode, myPreTalk, myPostTalk, config]);
+
+  // 4. Submit to Firestore
+  const handleSubmit = async (overrideMode?: SessionMode, overridePre?: number, overridePost?: number) => {
     setStep('WAITING');
 
-    // Use overrides if provided (from auto-submit), otherwise state
     const currentMode = overrideMode || myMode;
     const currentPre = overridePre || myPreTalk;
     const currentPost = overridePost || myPostTalk;
 
-    // Simulate partner "thinking"
-    setTimeout(() => {
-      // Logic: Partner picks random logical values
-      const pPre = Math.floor(Math.random() * 5) + 2; // 2-7 mins
-      const pPost = Math.floor(Math.random() * 5) + 2; // 2-7 mins
-      const pMode = config.duration >= 60 && Math.random() > 0.5 ? SessionMode.POMODORO : SessionMode.DEEP_WORK;
-
-      setPartnerPreTalk(pPre);
-      setPartnerPostTalk(pPost);
-      setPartnerMode(pMode);
-
-      // Calculate Agreement (Meet in the middle)
-      const agreedPre = Math.ceil((currentPre + pPre) / 2);
-      const agreedPost = Math.ceil((currentPost + pPost) / 2);
-      const agreedMode = (currentMode === pMode) ? currentMode : SessionMode.DEEP_WORK; // Default to Deep Work on conflict
-
-      setFinalConfig({
-        ...config,
-        mode: agreedMode,
-        preTalkMinutes: agreedPre,
-        postTalkMinutes: agreedPost
-      });
-
-      setStep('REVIEW');
-    }, 3000); // Short wait
+    try {
+        // Write to a 'negotiation' map inside the session doc
+        // Structure: sessions/{id}/negotiation/{userId} = { ...choices }
+        await updateDoc(doc(db, 'sessions', sessionId), {
+            [`negotiation.${userId}`]: {
+                mode: currentMode,
+                preTalk: currentPre,
+                postTalk: currentPost
+            }
+        });
+    } catch (err) {
+        console.error("Failed to submit negotiation:", err);
+    }
   };
 
+  const handleAutoSubmit = () => {
+    const randomMode = Math.random() > 0.5 ? SessionMode.DEEP_WORK : SessionMode.POMODORO;
+    const randomPre = Math.floor(Math.random() * 5) + 2;
+    const randomPost = Math.floor(Math.random() * 5) + 2;
+    
+    setMyMode(randomMode);
+    setMyPreTalk(randomPre);
+    setMyPostTalk(randomPost);
+    handleSubmit(randomMode, randomPre, randomPost);
+  };
+
+  // 5. Timers for transitioning UI
   useEffect(() => {
     if (step === 'REVIEW') {
-      const timer = setTimeout(() => {
-        setStep('AGREED');
-      }, 3500); // Show review for 3.5s
+      const timer = setTimeout(() => setStep('AGREED'), 3500); 
       return () => clearTimeout(timer);
     }
   }, [step]);
 
-useEffect(() => {
-  if (step === 'AGREED' && finalConfig) {
-    const timer = setTimeout(() => {
-      onNegotiationComplete(finalConfig);
-    }, 3000); // Changed from 5000 to match the UI text "3 seconds"
-    return () => clearTimeout(timer);
-  }
-}, [step, finalConfig, onNegotiationComplete]);
+  useEffect(() => {
+    if (step === 'AGREED' && finalConfig) {
+      const timer = setTimeout(() => onNegotiationComplete(finalConfig), 3000); 
+      return () => clearTimeout(timer);
+    }
+  }, [step, finalConfig, onNegotiationComplete]);
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-6 max-w-4xl mx-auto w-full">
@@ -205,7 +238,7 @@ useEffect(() => {
         <div className="flex flex-col items-center animate-pulse">
             <Users size={64} className="text-slate-600 mb-4" />
             <h3 className="text-xl font-medium text-slate-300">Negotiating...</h3>
-            <p className="text-slate-500 text-sm mt-2">Waiting for {partner.name}'s choices.</p>
+            <p className="text-slate-500 text-sm mt-2">Waiting for {partner.name}...</p>
         </div>
       )}
 

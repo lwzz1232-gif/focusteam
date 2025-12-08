@@ -155,10 +155,13 @@ export const App: React.FC = () => {
         />
       )}
 
+      {/* --- THIS IS THE UPDATED PART --- */}
       {currentScreen === Screen.NEGOTIATION && partner && user && (
         <Negotiation
           config={sessionConfig}
           partner={partner}
+          sessionId={sessionId!} // Added: We use ! because we know sessionId exists if we are in NEGOTIATION
+          userId={user.id}       // Added: Passing the current user ID for syncing
           onNegotiationComplete={handleNegotiationComplete}
           onSkipMatch={handleCancelMatch}
         />

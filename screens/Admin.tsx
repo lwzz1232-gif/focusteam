@@ -21,10 +21,10 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
 
-    // NEW: Ban Duration State
+    // Ban Duration State
     const [banDuration, setBanDuration] = useState(24);
 
-    // NEW: User History State (for the modal)
+    // User History State (for the modal)
     const [historyReports, setHistoryReports] = useState<any[]>([]);
 
     // Pagination
@@ -139,9 +139,9 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
         setSessionChats(chatsSnap.docs.map(d => ({ ...d.data(), id: d.id, timestamp: d.data().timestamp?.toMillis() } as ChatMessage)));
     };
 
-    // NEW: Open User History Modal
+    // Open User History Modal
     const openUserHistoryModal = async (user: any, userId: string) => {
-        setHistoryReports([]); // Clear previous
+        setHistoryReports([]); 
         setModal({ isOpen: true, type: 'USER_HISTORY', data: { user, id: userId }, title: 'User Report History' });
         
         try {
@@ -199,31 +199,38 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
         } catch (e) { console.error(e); }
     };
 
-    // FIXED: Better Delete Handling
+    // DELETE REPORT
     const handleDismissReport = async (reportId: string, e?: React.MouseEvent) => {
-        e?.stopPropagation(); // Prevent click from bubbling to other elements
-        
-        if (!window.confirm("Are you sure you want to delete this report?")) return;
+        e?.stopPropagation(); 
+        if (!window.confirm("Delete this report permanently?")) return;
 
-        // Optimistic update: Remove from UI immediately so it feels "working"
+        // Optimistic UI update (Hides it immediately)
         setReports(prev => prev.filter(r => r.id !== reportId));
 
         try {
             await deleteDoc(doc(db, 'reports', reportId));
-        } catch (e) { 
+        } catch (e: any) { 
+            // If DB fails, show error and bring it back
             console.error("Delete failed:", e);
-            fetchInitialData(); // If it fails, reload data to show it again
+            alert("Failed to delete report: " + e.message);
+            fetchInitialData(); // Reload to show the item again
         }
     };
 
-    // NEW: Mark Report as Read/Seen
+    // MARK AS READ/SEEN
     const handleMarkAsRead = async (reportId: string, e?: React.MouseEvent) => {
         e?.stopPropagation();
+        
         // Optimistic UI update
         setReports(prev => prev.map(r => r.id === reportId ? { ...r, read: true } : r));
+        
         try {
             await updateDoc(doc(db, 'reports', reportId), { read: true });
-        } catch (e) { console.error(e); }
+        } catch (e: any) { 
+            console.error("Update failed:", e);
+            alert("Failed to mark as read: " + e.message);
+            fetchInitialData(); // Revert if failed
+        }
     };
 
     const closeModal = () => {
@@ -310,7 +317,7 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
 
                 {/* Tab Navigation */}
                 <div className="flex gap-1 bg-slate-900/80 p-1.5 rounded-xl border border-white/5 w-fit mb-6 shadow-xl sticky top-0 z-20 backdrop-blur">
-                    {/* NEW: Badge count only shows unread reports */}
+                    {/* Badge shows count of Unread (NEW) reports only */}
                     <TabButton active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} icon={<AlertTriangle size={16}/>} label="Reports" count={reports.filter(r => !r.read).length} alert={reports.some(r => !r.read)} />
                     <TabButton active={activeTab === 'sessions'} onClick={() => setActiveTab('sessions')} icon={<History size={16}/>} label="History" />
                     <TabButton active={activeTab === 'users'} onClick={() => setActiveTab('users')} icon={<Users size={16}/>} label="Userbase" />
@@ -325,11 +332,11 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                         {reports.map((report) => (
                             <div 
                                 key={report.id} 
-                                className={`bg-slate-900/80 border rounded-xl p-5 shadow-lg relative overflow-hidden group transition-all duration-300 ${!report.read ? 'border-blue-500/50 shadow-blue-500/10' : 'border-white/5 opacity-80 hover:opacity-100'}`}
+                                className={`bg-slate-900/80 border rounded-xl p-5 shadow-lg relative overflow-hidden group transition-all duration-300 ${!report.read ? 'border-blue-500/50 shadow-blue-500/10' : 'border-white/5 opacity-70 hover:opacity-100'}`}
                             >
                                 {/* NEW: Visual indicator for Unread */}
                                 { !report.read && (
-                                    <div className="absolute top-0 right-0 bg-blue-500 text-white text-[9px] font-bold px-2 py-1 rounded-bl-lg z-10 animate-pulse">
+                                    <div className="absolute top-0 right-0 bg-blue-500 text-white text-[9px] font-bold px-2 py-1 rounded-bl-lg z-10 animate-pulse shadow-lg shadow-blue-500/20">
                                         NEW
                                     </div>
                                 )}
@@ -346,7 +353,7 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                                         </div>
                                     </div>
                                     <div className="flex gap-2">
-                                        {/* NEW: Mark as Read Button */}
+                                        {/* Mark as Read Button */}
                                         <button 
                                             onClick={(e) => handleMarkAsRead(report.id, e)} 
                                             className={`p-2 rounded-lg transition-colors ${report.read ? 'text-slate-600 hover:text-white' : 'text-blue-400 hover:bg-blue-500/20'}`}
@@ -367,7 +374,7 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                                 <div className="bg-black/30 p-3 rounded-lg border border-white/5 flex items-center justify-between">
                                     <div>
                                         <div className="text-[10px] text-slate-500 uppercase font-bold">Offender</div>
-                                        {/* NEW: Click Name to Open History Modal */}
+                                        {/* Click Name to Open History Modal */}
                                         <div 
                                             className="font-bold text-white text-base flex items-center gap-2 cursor-pointer hover:text-blue-400 hover:underline transition-all" 
                                             onClick={() => openUserHistoryModal(report.reportedUserObj, report.reportedId)}
@@ -539,7 +546,7 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                                     <Button onClick={downloadChatLog} variant="secondary" className="w-full text-xs"><Download size={14} className="mr-2"/> Download Log</Button>
                                 </div>
                             ) : modal.type === 'USER_HISTORY' ? (
-                                // NEW: USER HISTORY VIEW
+                                // USER HISTORY VIEW
                                 <div className="space-y-4">
                                     <div className="flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg border border-white/5">
                                         <div className="w-10 h-10 bg-slate-700 rounded-full flex items-center justify-center font-bold text-white">

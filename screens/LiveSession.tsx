@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Partner, SessionPhase, User, SessionConfig, SessionDuration, TodoItem } from '../types';
 import { Button } from '../components/Button';
 import { generateIcebreaker } from '../services/geminiService';
-import { Mic, MicOff, Video, VideoOff, Sparkles, LogOut, Lock, User as UserIcon, MessageSquare, ListChecks, ThumbsUp, Heart, Zap, Smile } from 'lucide-react';
+// Added Flag, X
+import { Mic, MicOff, Video, VideoOff, Sparkles, LogOut, Lock, User as UserIcon, MessageSquare, ListChecks, ThumbsUp, Heart, Zap, Smile, Flag, X } from 'lucide-react';
 import { ChatWindow } from '../components/ChatWindow';
 import { TaskBoard } from '../components/TaskBoard';
 import { SessionRecap } from '../components/SessionRecap';
@@ -37,10 +38,15 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [icebreaker, setIcebreaker] = useState<string | null>(null);
   const [isLoadingIcebreaker, setIsLoadingIcebreaker] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [unreadChatCount, setUnreadChatCount] = useState(0); // Defined here
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [isTaskBoardOpen, setIsTaskBoardOpen] = useState(false);
   const [showUI, setShowUI] = useState(true); 
   const [floatingEmojis, setFloatingEmojis] = useState<{id: number, emoji: string, left: number}[]>([]); 
+
+  // Report State
+  const [isReportOpen, setIsReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState('Inappropriate Behavior');
+  const [reportDetails, setReportDetails] = useState('');
 
   // Draggable Self-Video State
   const [selfPos, setSelfPos] = useState({ x: 20, y: 20 });
@@ -155,6 +161,28 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       setTimeout(() => setFloatingEmojis(prev => prev.filter(e => e.id !== id)), 2000);
   };
 
+  // --- 5. REPORT ---
+  const handleReportSubmit = async () => {
+      if (!reportReason) return;
+      try {
+          await addDoc(collection(db, 'reports'), {
+              reporterId: user.id,
+              reportedId: partner.id,
+              sessionId,
+              reason: reportReason,
+              details: reportDetails,
+              timestamp: serverTimestamp(),
+              status: 'pending'
+          });
+          setIsReportOpen(false);
+          setReportDetails('');
+          alert("Report submitted successfully.");
+      } catch (e) {
+          console.error("Report error:", e);
+          alert("Failed to submit report.");
+      }
+  };
+
   // --- MEDIA ---
   useEffect(() => {
       if (myVideoRef.current && localStream) myVideoRef.current.srcObject = localStream;
@@ -247,9 +275,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           </div>
       )}
 
+      {/* --- LAYER 1: AMBIENT GLOW --- */}
       <div className={`absolute inset-0 bg-gradient-to-b ${getPhaseColor()} transition-colors duration-[2000ms] pointer-events-none z-0`}></div>
 
-      <div className="absolute inset-0 z-10">
+      {/* --- LAYER 2: PARTNER VIDEO (FULL SCREEN) - UPDATED WITH SCALE EFFECT --- */}
+      <div className={`absolute inset-0 z-10 transition-all duration-1000 ease-in-out ${phase === SessionPhase.FOCUS ? 'scale-95 rounded-3xl overflow-hidden shadow-2xl border border-white/5' : ''}`}>
           {remoteStream ? (
               <video ref={partnerVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
           ) : (
@@ -261,9 +291,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                   <span className="text-slate-500 font-medium animate-pulse">Establishing link...</span>
               </div>
           )}
+          {/* Phase Overlay (Darken during Focus) */}
           <div className={`absolute inset-0 bg-black/40 transition-opacity duration-1000 pointer-events-none ${phase === SessionPhase.FOCUS ? 'opacity-60 backdrop-grayscale-[30%]' : 'opacity-0'}`}></div>
       </div>
 
+      {/* --- LAYER 3: FLOATING REACTIONS --- */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden z-20">
           {floatingEmojis.map(e => (
               <div 
@@ -276,6 +308,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           ))}
       </div>
 
+      {/* --- LAYER 4: SELF VIDEO (DRAGGABLE PIP) --- */}
       <div 
         onMouseDown={handleMouseDown}
         style={{ transform: `translate(${selfPos.x}px, ${selfPos.y}px)` }}
@@ -288,8 +321,10 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           </div>
       </div>
 
+      {/* --- LAYER 5: UI CONTROLS --- */}
       <div className={`absolute inset-0 pointer-events-none z-40 transition-opacity duration-500 ${showUI ? 'opacity-100' : 'opacity-0'}`}>
         
+        {/* Top Bar */}
         <div className="absolute top-6 left-0 right-0 flex justify-center pointer-events-none">
             <div className={`backdrop-blur-md border rounded-full px-6 py-2 flex items-center gap-4 shadow-xl transition-all duration-500 ${phase === SessionPhase.FOCUS ? 'bg-black/60 border-red-500/30' : 'bg-slate-900/80 border-slate-700'}`}>
                 <span className={`text-xs font-bold uppercase tracking-wider ${phase === SessionPhase.FOCUS ? 'text-red-400' : 'text-slate-400'}`}>{phase}</span>
@@ -300,17 +335,31 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             </div>
         </div>
 
+        {/* Report Button (NEW) */}
+        <div className="absolute top-6 left-6 pointer-events-auto">
+            <button 
+                onClick={() => setIsReportOpen(true)} 
+                className="p-3 rounded-full bg-slate-900/40 text-slate-400 hover:text-red-400 hover:bg-slate-900 border border-slate-700/50 backdrop-blur-md transition-all hover:scale-105"
+                title="Report User"
+            >
+                <Flag size={16} />
+            </button>
+        </div>
+
+        {/* Exit Button */}
         <div className="absolute top-6 right-6 pointer-events-auto">
             <Button variant="danger" onClick={() => confirm("Exit session?") && finishSession(true)} className="py-2 px-3 text-xs bg-red-500/20 hover:bg-red-500/30 border-red-500/50 backdrop-blur-md">
                 <LogOut size={14} className="mr-2"/> Exit
             </Button>
         </div>
 
+        {/* Floating Windows */}
         <div className="pointer-events-auto">
              <ChatWindow messages={chatMessages} onSendMessage={sendMessage} partnerName={partner.name} isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
              <TaskBoard isOpen={isTaskBoardOpen} onClose={() => setIsTaskBoardOpen(false)} myTasks={myTasks} partnerTasks={partnerTasks} onAddTask={handleAddTask} onToggleTask={handleToggleTask} onDeleteTask={handleDeleteTask} isRevealed={phase !== SessionPhase.FOCUS} canEdit={phase === SessionPhase.ICEBREAKER} partnerName={partner.name} />
         </div>
 
+        {/* Bottom Control Bar */}
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-4 pointer-events-auto">
              <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700 rounded-full px-4 py-2 flex items-center gap-2 mr-4 shadow-lg">
                  <button onClick={() => handleReaction('🔥')} className="hover:scale-125 transition-transform text-xl">🔥</button>
@@ -350,6 +399,50 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             <div className="absolute bottom-32 left-1/2 -translate-x-1/2 bg-slate-900/95 border border-yellow-500/30 text-yellow-100 px-6 py-4 rounded-2xl shadow-2xl max-w-md text-center pointer-events-auto animate-in slide-in-from-bottom-4">
                 <p className="text-sm font-medium">✨ {icebreaker}</p>
                 <button onClick={() => setIcebreaker(null)} className="absolute -top-2 -right-2 bg-slate-800 rounded-full p-1 border border-slate-700 hover:bg-slate-700"><LogOut size={12}/></button>
+            </div>
+        )}
+
+        {/* Report Modal (NEW) */}
+        {isReportOpen && (
+            <div className="absolute inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+                <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4 pointer-events-auto">
+                    <div className="flex justify-between items-center">
+                        <h3 className="text-white font-bold flex items-center gap-2">
+                            <Flag size={18} className="text-red-500"/> Report User
+                        </h3>
+                        <button onClick={() => setIsReportOpen(false)} className="text-slate-500 hover:text-white"><X size={20}/></button>
+                    </div>
+                    
+                    <div className="space-y-2">
+                        <label className="text-xs text-slate-400 uppercase font-bold">Reason</label>
+                        <select 
+                            value={reportReason}
+                            onChange={(e) => setReportReason(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm text-white focus:outline-none focus:border-red-500"
+                        >
+                            <option>Inappropriate Behavior</option>
+                            <option>Abusive Language</option>
+                            <option>Spam / Commercial</option>
+                            <option>Camera Off / Not Working</option>
+                            <option>Other</option>
+                        </select>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-xs text-slate-400 uppercase font-bold">Details (Optional)</label>
+                        <textarea 
+                            value={reportDetails}
+                            onChange={(e) => setReportDetails(e.target.value)}
+                            placeholder="Describe what happened..."
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm text-white focus:outline-none focus:border-red-500 min-h-[80px] resize-none"
+                        />
+                    </div>
+
+                    <div className="flex gap-2 pt-2">
+                        <Button variant="secondary" onClick={() => setIsReportOpen(false)} className="flex-1">Cancel</Button>
+                        <Button variant="danger" onClick={handleReportSubmit} className="flex-1">Submit</Button>
+                    </div>
+                </div>
             </div>
         )}
       </div>

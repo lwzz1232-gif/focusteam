@@ -1,11 +1,11 @@
-
 import React, { useState, useEffect } from 'react';
 import { User, Screen, Notification } from '../types';
 import { LogOut, ShieldAlert, Instagram, Facebook, Music2, Bell } from 'lucide-react';
 import { Logo } from './Logo';
-import { getNotifications, markNotificationRead } from '../services/mockBackend';
-import { updateDoc } from 'firebase/firestore';
-import { deleteDoc } from 'firebase/firestore';
+import { getNotifications } from '../services/mockBackend';
+import { updateDoc, doc, deleteDoc } from 'firebase/firestore';
+import { db } from '../utils/firebaseConfig';
+
 interface LayoutProps {
   children: React.ReactNode;
   user: User | null;
@@ -16,59 +16,78 @@ interface LayoutProps {
 
 export const Layout: React.FC<LayoutProps> = ({ children, user, currentScreen, onLogout, onAdminClick }) => {
   const showLogout = currentScreen === Screen.DASHBOARD;
-  // FIX: Allow both 'admin' and 'dev' roles to access admin features
- const showAdmin = user?.role === 'admin' && currentScreen === Screen.DASHBOARD;
+  // Allow both 'admin' and 'dev' roles to access admin features
+  const showAdmin = (user?.role === 'admin' || user?.role === 'dev') && currentScreen === Screen.DASHBOARD;
   const showFooter = currentScreen !== Screen.SPLASH && currentScreen !== Screen.SESSION;
   const showNotifications = user && currentScreen !== Screen.SPLASH && currentScreen !== Screen.SESSION;
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
+  
+  // Calculate unread count purely from state
   const unreadCount = notifications.filter(n => !n.read).length;
 
-useEffect(() => {
+  useEffect(() => {
     if (user) {
         const fetchNotes = async () => {
-            const notes = await getNotifications(user.id);
-            
-            // Filter out notifications that should be deleted
-            const now = Date.now();
-            const validNotes = notes.filter(n => {
-                if (n.read && (n as any).deleteAt && (n as any).deleteAt < now) {
-                    // Delete from Firestore
-                    deleteDoc(doc(db, 'users', user.id, 'notifications', n.id)).catch(console.error);
-                    return false;
+            try {
+                const notes = await getNotifications(user.id);
+                const now = Date.now();
+                
+                // 1. Separate valid notes from expired ones
+                const validNotes: Notification[] = [];
+                
+                for (const n of notes) {
+                    const noteData = n as any;
+                    // If marked for deletion and time has passed, delete from DB
+                    if (noteData.deleteAt && noteData.deleteAt < now) {
+                        console.log(`[NOTIF] Auto-deleting expired notification: ${n.id}`);
+                        deleteDoc(doc(db, 'users', user.id, 'notifications', n.id)).catch(console.error);
+                    } else {
+                        validNotes.push(n);
+                    }
                 }
-                return true;
-            });
-            
-            setNotifications(validNotes);
+                
+                // 2. Sort by timestamp (newest first)
+                validNotes.sort((a, b) => b.timestamp - a.timestamp);
+                setNotifications(validNotes);
+            } catch (error) {
+                console.error("Failed to fetch notifications:", error);
+            }
         };
+
+        // Initial fetch
         fetchNotes();
-        const interval = setInterval(fetchNotes, 3000);
+        
+        // Poll every 5 seconds (slightly less aggressive than 3s)
+        const interval = setInterval(fetchNotes, 5000);
         return () => clearInterval(interval);
     }
-}, [user]);
+  }, [user]);
 
   const handleNotificationClick = async (id: string) => {
     if (!user) return;
     
-    // Mark as read and set deletion timer
-    const readAt = Date.now();
-    const deleteAt = readAt + (12 * 60 * 60 * 1000); // 12 hours
-    
-    await updateDoc(doc(db, 'users', user.id, 'notifications', id), {
-        read: true,
-        readAt: readAt,
-        deleteAt: deleteAt
-    });
-    
+    // Optimistic UI Update: Mark read immediately
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
     
-    // Schedule local removal after 12h
-    setTimeout(() => {
-        setNotifications(prev => prev.filter(n => n.id !== id));
-    }, 12 * 60 * 60 * 1000);
-};
+    try {
+        const readAt = Date.now();
+        const deleteAt = readAt + (12 * 60 * 60 * 1000); // 12 hours from now
+        
+        // Update Firestore
+        await updateDoc(doc(db, 'users', user.id, 'notifications', id), {
+            read: true,
+            readAt: readAt,
+            deleteAt: deleteAt
+        });
+        console.log(`[NOTIF] Marked ${id} as read. Will expire at ${new Date(deleteAt).toLocaleString()}`);
+    } catch (error) {
+        console.error("Failed to mark notification read:", error);
+        // Revert UI if failed (optional, but good practice)
+        setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: false } : n));
+    }
+  };
 
   const getGreeting = () => {
       if (!user) return "";
@@ -110,8 +129,8 @@ useEffect(() => {
                       </button>
 
                       {showNotifDropdown && (
-                          <div className="absolute top-full right-0 mt-2 w-80 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2">
-                              <div className="p-3 border-b border-slate-800 font-semibold text-sm flex justify-between">
+                          <div className="absolute top-full right-0 mt-2 w-80 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 z-50">
+                              <div className="p-3 border-b border-slate-800 font-semibold text-sm flex justify-between bg-slate-950">
                                   <span>Notifications</span>
                                   {unreadCount > 0 && <span className="text-xs text-blue-400">{unreadCount} new</span>}
                               </div>
@@ -123,11 +142,11 @@ useEffect(() => {
                                           <div 
                                             key={note.id} 
                                             onClick={() => handleNotificationClick(note.id)}
-                                            className={`p-3 border-b border-slate-800/50 cursor-pointer hover:bg-slate-800 transition-colors ${!note.read ? 'bg-blue-500/5' : ''}`}
+                                            className={`p-3 border-b border-slate-800/50 cursor-pointer hover:bg-slate-800 transition-colors ${!note.read ? 'bg-blue-500/10 border-l-2 border-l-blue-500' : ''}`}
                                           >
                                               {note.type === 'system' && (
-                                                  <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wide block mb-1">
-                                                      From: FocusTwin Team
+                                                  <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wide block mb-1 flex items-center gap-1">
+                                                      <ShieldAlert size={10} /> FocusTwin Team
                                                   </span>
                                               )}
                                               <p className={`text-sm ${!note.read ? 'text-white font-medium' : 'text-slate-400'}`}>
@@ -183,7 +202,6 @@ useEffect(() => {
                 <div className="flex items-center gap-4">
                     <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Find Us Here</span>
                     <div className="flex items-center gap-3">
-                        {/* Instagram - Official Color #E4405F */}
                         <a 
                           href="#" 
                           className="group p-2 rounded-full bg-slate-900 border border-slate-800 text-slate-500 transition-all duration-300 hover:text-[#E4405F] hover:border-[#E4405F]/50 hover:bg-[#E4405F]/10 hover:shadow-[0_0_15px_rgba(228,64,95,0.4)] hover:-translate-y-1"
@@ -192,7 +210,6 @@ useEffect(() => {
                             <Instagram size={18} />
                         </a>
 
-                        {/* TikTok - Official Colors: Black/White with Red (#ff0050) & Cyan (#00f2ea) Accents */}
                         <a 
                           href="#" 
                           className="group p-2 rounded-full bg-slate-900 border border-slate-800 text-slate-500 transition-all duration-300 hover:text-white hover:border-[#ff0050]/60 hover:bg-slate-900 hover:shadow-[0_0_15px_rgba(0,242,234,0.4)] hover:-translate-y-1 relative overflow-hidden"
@@ -202,7 +219,6 @@ useEffect(() => {
                             <Music2 size={18} className="relative z-10" />
                         </a>
 
-                        {/* Facebook - Official Color #1877F2 */}
                         <a 
                           href="#" 
                           className="group p-2 rounded-full bg-slate-900 border border-slate-800 text-slate-500 transition-all duration-300 hover:text-[#1877F2] hover:border-[#1877F2]/50 hover:bg-[#1877F2]/10 hover:shadow-[0_0_15px_rgba(24,119,242,0.4)] hover:-translate-y-1"

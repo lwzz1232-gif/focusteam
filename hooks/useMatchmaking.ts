@@ -39,6 +39,7 @@ export function useMatchmaking(
   const [status, setStatus] = useState<'IDLE' | 'SEARCHING' | 'MATCHED'>('IDLE');
   const [error, setError] = useState<string | undefined>(undefined);
 
+  // Refs
   const onMatchRef = useRef(onMatch);
   const sessionListenerUnsubRef = useRef<(() => void) | null>(null);
   const queueListenerUnsubRef = useRef<(() => void) | null>(null);
@@ -67,6 +68,7 @@ export function useMatchmaking(
     return () => {
       isMountedRef.current = false;
       stopAllListeners();
+      // On unmount, if we were searching, clean up.
       if (user) forceCleanupUserPending(user.id).catch(() => {});
     };
   }, [user]);
@@ -83,8 +85,6 @@ export function useMatchmaking(
     queueListenerUnsubRef.current = null;
   }, []);
 
-  // --- HELPERS ---
-
   const cleanupExpiredSessions = useCallback(async () => {
     try {
       const threshold = Timestamp.fromDate(new Date(Date.now() - SESSION_EXPIRATION_MS));
@@ -97,57 +97,51 @@ export function useMatchmaking(
   const forceCleanupUserPending = useCallback(async (userId: string) => {
     try {
       await deleteDoc(doc(db, QUEUE_COLLECTION, userId));
-      // Only delete sessions that NEVER started. 
-      // We do NOT delete 'started:true' here, or we lose history/chat logs if you want them.
-      // But for matchmaking, we ignore them.
-      const q = query(
-        collection(db, SESSIONS_COLLECTION),
-        where('participants', 'array-contains', userId),
-        where('started', '==', false)
-      );
-      const snap = await getDocs(q);
-      await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
     } catch (err) {}
   }, []);
 
-  const findMySession = useCallback(async (userId: string) => {
-    // FIX: Only look for sessions created in the last 60 seconds.
-    // This prevents joining a session from 3 hours ago by accident.
-    const recent = Timestamp.fromDate(new Date(Date.now() - 60000)); 
-    
-    const q = query(
-      collection(db, SESSIONS_COLLECTION),
-      where('participants', 'array-contains', userId),
-      where('createdAt', '>', recent), // CRITICAL FIX
-      orderBy('createdAt', 'desc'),
-      limit(1)
-    );
-    const snap = await getDocs(q);
-    return snap.empty ? null : snap.docs[0];
+  const hasActiveSession = useCallback(async (userId: string): Promise<boolean> => {
+    try {
+      const recentThreshold = Timestamp.fromDate(new Date(Date.now() - SESSION_EXPIRATION_MS));
+      const q = query(
+        collection(db, SESSIONS_COLLECTION),
+        where('participants', 'array-contains', userId),
+        where('started', '==', true),
+        where('createdAt', '>', recentThreshold),
+        limit(1)
+      );
+      const snap = await getDocs(q);
+      return !snap.empty;
+    } catch (err) { return false; }
   }, []);
 
-  // --- LISTENER ---
+  // --- LISTENER LOGIC ---
 
   const attachSessionListener = useCallback(
     (sessionId: string, userId: string, localOnMatch?: (partner: Partner, sessionId: string) => void) => {
       if (currentSessionIdRef.current === sessionId) return;
 
-      console.log(`[LISTENER] Attaching: ${sessionId}`);
-      if (sessionListenerUnsubRef.current) sessionListenerUnsubRef.current();
+      console.log(`[LISTENER] Joining session: ${sessionId}`);
+      
+      // Stop queue listeners and retries immediately
+      if (matchRetryIntervalRef.current) clearInterval(matchRetryIntervalRef.current);
+      if (queueListenerUnsubRef.current) queueListenerUnsubRef.current();
 
       matchedRef.current = false;
       currentSessionIdRef.current = sessionId;
 
-      const unsub = onSnapshot(
+      if (sessionListenerUnsubRef.current) sessionListenerUnsubRef.current();
+
+      sessionListenerUnsubRef.current = onSnapshot(
         doc(db, SESSIONS_COLLECTION, sessionId),
         (snap) => {
           if (!snap.exists()) return;
           const data = snap.data() as any;
 
+          // 1. MATCH SUCCESS
           if (data.started === true && !matchedRef.current) {
             matchedRef.current = true;
-            stopAllListeners();
-
+            
             if (isMountedRef.current) {
               const partnerInfo = data.participantInfo?.find((p: any) => p.userId !== userId);
               if (partnerInfo) {
@@ -164,21 +158,22 @@ export function useMatchmaking(
             return;
           }
 
-          // Failsafe: Start session if 2 people are there
+          // 2. FAILSAFE: If 2 people are here but it hasn't started, START IT.
           if (data.started === false && data.participants?.length >= 2) {
              runTransaction(db, async (tx) => {
                 const sDoc = await tx.get(snap.ref);
-                if (sDoc.exists() && !sDoc.data().started) tx.update(snap.ref, { started: true });
+                if (sDoc.exists() && !sDoc.data().started) {
+                  tx.update(snap.ref, { started: true });
+                }
              }).catch(() => {});
           }
         }
       );
-      sessionListenerUnsubRef.current = unsub;
     },
-    [stopAllListeners]
+    []
   );
 
-  // --- MATCHMAKING ---
+  // --- MATCHMAKING LOGIC ---
 
   const attemptMatch = useCallback(
     async (userId: string, config: SessionConfig) => {
@@ -186,6 +181,7 @@ export function useMatchmaking(
       matchInProgressRef.current = true;
 
       try {
+        // 1. Find a candidate
         const q = query(collection(db, QUEUE_COLLECTION), orderBy('createdAt', 'asc'), limit(10));
         const snapshot = await getDocs(q);
         const partnerDoc = snapshot.docs.find(d => d.id !== userId);
@@ -197,7 +193,7 @@ export function useMatchmaking(
 
         const partnerId = partnerDoc.data().userId;
 
-        // Sort carefully to ensure A_B is always A_B
+        // 2. Deterministic ID (Alphabetical)
         const sortedIds = [userId, partnerId].sort((a, b) => a.localeCompare(b));
         const deterministicSessionId = `${sortedIds[0]}_${sortedIds[1]}`;
 
@@ -205,59 +201,45 @@ export function useMatchmaking(
           const sessionRef = doc(db, SESSIONS_COLLECTION, deterministicSessionId);
           const sessionSnap = await tx.get(sessionRef);
 
-          const myQueueRef = doc(db, QUEUE_COLLECTION, userId);
-          const partnerQueueRef = doc(db, QUEUE_COLLECTION, partnerId);
-
-          const sessionPayload = {
-            type: config.type || 'ANY',
-            config,
-            participants: [userId, partnerId],
-            participantInfo: [
-              { userId: userId, displayName: 'User', photoURL: '' }, // Add real names if available
-              { userId: partnerId, displayName: 'Partner', photoURL: '' },
-            ],
-            createdAt: serverTimestamp(),
-            started: false,
-          };
-
-          // CRITICAL FIX: Handling "Zombie" sessions
+          // ZOMBIE CHECK: If session exists and is OLD/STARTED, we overwrite it.
+          // If it exists and is NEW/NOT-STARTED, we join it.
+          let shouldOverwrite = true;
           if (sessionSnap.exists()) {
-            const existingData = sessionSnap.data();
-            
-            // If the session exists and is 'started', it's an OLD session.
-            // We must OVERWRITE it to start a new game.
-            if (existingData.started === true) {
-               console.log('[MATCH] Overwriting old session...');
-               tx.set(sessionRef, sessionPayload); // Force overwrite
-               tx.delete(myQueueRef);
-               tx.delete(partnerQueueRef);
-               return;
-            } else {
-               // If it exists but started=false, someone else (the partner) just created it.
-               // We don't overwrite, we just delete our queue and join.
-               // Verify queue existence to be safe
-               const myQ = await tx.get(myQueueRef);
-               if (myQ.exists()) tx.delete(myQueueRef);
-               return;
-            }
+             const existing = sessionSnap.data();
+             if (existing.started === false) {
+               shouldOverwrite = false; // Join existing fresh session
+             }
+             // If started===true, we assume it's a zombie from yesterday and overwrite
           }
 
-          // If session does not exist, check queues and create
+          const myQueueRef = doc(db, QUEUE_COLLECTION, userId);
+          const partnerQueueRef = doc(db, QUEUE_COLLECTION, partnerId);
+          
           const [myQ, partnerQ] = await Promise.all([tx.get(myQueueRef), tx.get(partnerQueueRef)]);
+          
+          // Verify both users are still in queue
           if (!myQ.exists() || !partnerQ.exists()) throw new Error('RETRY');
 
-          // Add names/photos from queue data
-          sessionPayload.participantInfo = [
-            { userId: userId, displayName: myQ.data().userDisplayName, photoURL: myQ.data().userPhotoURL },
-            { userId: partnerId, displayName: partnerQ.data().userDisplayName, photoURL: partnerQ.data().userPhotoURL },
-          ];
+          // CREATE/UPDATE SESSION
+          if (shouldOverwrite) {
+            tx.set(sessionRef, {
+              type: config.type || 'ANY',
+              config,
+              participants: [userId, partnerId],
+              participantInfo: [
+                { userId: userId, displayName: myQ.data().userDisplayName, photoURL: myQ.data().userPhotoURL },
+                { userId: partnerId, displayName: partnerQ.data().userDisplayName, photoURL: partnerQ.data().userPhotoURL },
+              ],
+              createdAt: serverTimestamp(),
+              started: false,
+            });
+          }
 
-          tx.set(sessionRef, sessionPayload);
-          tx.delete(myQueueRef);
-          tx.delete(partnerQueueRef);
+          // SIGNAL: UPDATE QUEUES instead of deleting them
+          // This tells both clients "Here is your ID, go join it"
+          tx.update(myQueueRef, { sessionId: deterministicSessionId });
+          tx.update(partnerQueueRef, { sessionId: deterministicSessionId });
         });
-
-        attachSessionListener(deterministicSessionId, userId, onMatchRef.current);
 
       } catch (err: any) {
         if (err.message !== 'RETRY') console.warn('[MATCH] Error:', err);
@@ -265,8 +247,10 @@ export function useMatchmaking(
         matchInProgressRef.current = false;
       }
     },
-    [attachSessionListener]
+    []
   );
+
+  // --- JOIN LOGIC ---
 
   const joinQueue = useCallback(
     async (config: SessionConfig) => {
@@ -277,37 +261,49 @@ export function useMatchmaking(
       activeConfigRef.current = config;
 
       try {
+        if (await hasActiveSession(user.id)) {
+          setError("Already in an active session.");
+          setStatus('IDLE');
+          return;
+        }
+
         await forceCleanupUserPending(user.id);
 
         const myQueueRef = doc(db, QUEUE_COLLECTION, user.id);
+        
+        // 1. Create Queue Ticket
         await setDoc(myQueueRef, {
           userId: user.id,
           userDisplayName: user.name ?? 'Anonymous',
           userPhotoURL: user.avatar ?? '',
           config,
           createdAt: serverTimestamp(),
+          sessionId: null // Initial state
         });
 
+        // 2. LISTEN TO OWN TICKET (The Fix)
         if (queueListenerUnsubRef.current) queueListenerUnsubRef.current();
         
-        // Listen to own queue logic
-        queueListenerUnsubRef.current = onSnapshot(myQueueRef, async (snap) => {
-          if (!snap.exists() && isMountedRef.current && !matchedRef.current && status === 'SEARCHING') {
-            console.log('[QUEUE] Removed! Finding FRESH session...');
-            // Wait 500ms for Firestore consistency
-            setTimeout(async () => {
-                const sessionDoc = await findMySession(user.id);
-                if (sessionDoc) {
-                  attachSessionListener(sessionDoc.id, user.id, onMatchRef.current);
-                } else {
-                  console.warn('[QUEUE] Removed but no fresh session found. This is odd.');
-                }
-            }, 500);
+        queueListenerUnsubRef.current = onSnapshot(myQueueRef, (snap) => {
+          if (!snap.exists()) return; // Should not happen unless cancelled
+          
+          const data = snap.data();
+          
+          // IF WE HAVE BEEN ASSIGNED A SESSION ID
+          if (data?.sessionId && !matchedRef.current) {
+             console.log('[QUEUE] Match signal received!', data.sessionId);
+             
+             // 1. Attach to session
+             attachSessionListener(data.sessionId, user.id, onMatchRef.current);
+             
+             // 2. Clean up my queue ticket
+             deleteDoc(myQueueRef).catch(console.error);
           }
         });
 
+        // 3. Start Search Loop
         await attemptMatch(user.id, config);
-
+        
         if (matchRetryIntervalRef.current) clearInterval(matchRetryIntervalRef.current);
         matchRetryIntervalRef.current = setInterval(() => {
           if (!matchedRef.current && activeConfigRef.current) {
@@ -320,7 +316,7 @@ export function useMatchmaking(
         setStatus('IDLE');
       }
     },
-    [user, attemptMatch, forceCleanupUserPending, findMySession, attachSessionListener, status]
+    [user, attemptMatch, hasActiveSession, forceCleanupUserPending, attachSessionListener]
   );
 
   const cancelSearch = useCallback(async () => {

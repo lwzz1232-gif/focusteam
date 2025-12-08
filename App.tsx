@@ -10,7 +10,8 @@ import { Admin } from './screens/Admin';
 import { useAuth } from './hooks/useAuth';
 import { Screen, SessionConfig, Partner, SessionType, SessionDuration, SessionMode } from './types';
 import { db } from './utils/firebaseConfig';
-import { collection, query, where, getDocs, onSnapshot, doc } from 'firebase/firestore';
+// Added setDoc and serverTimestamp for the Test Mode fix
+import { collection, query, where, getDocs, onSnapshot, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -80,19 +81,46 @@ export const App: React.FC = () => {
     else setCurrentScreen(Screen.LOGIN);
   };
 
-  const handleStartMatch = (config: SessionConfig) => {
+  // --- UPDATED: Async to handle Test Session Creation ---
+  const handleStartMatch = async (config: SessionConfig) => {
     setSessionConfig(config);
     
-    // TEST MODE: Skip matching for admins
-    if (config.duration === SessionDuration.TEST && user?.role === 'admin') {
+    // TEST MODE: Skip matching for admins AND create a dummy session doc
+    if (config.duration === SessionDuration.TEST && (user?.role === 'admin' || user?.role === 'dev')) {
+      const botId = 'bot-' + Date.now();
       const botPartner: Partner = {
-        id: 'bot-test-' + Date.now(),
+        id: botId,
         name: 'Test Bot',
         type: config.type
       };
-      setPartner(botPartner);
-      setCurrentScreen(Screen.SESSION); // Skip matching & negotiation
+      
+      const testSessionId = `TEST_${user.id}_${Date.now()}`;
+      
+      try {
+          // Create a real document so LiveSession listeners have something to sync with
+          await setDoc(doc(db, 'sessions', testSessionId), {
+              type: config.type,
+              config,
+              participants: [user.id, botId],
+              participantInfo: [
+                  { userId: user.id, displayName: user.name, photoURL: user.avatar || '' },
+                  { userId: botId, displayName: 'Test Bot', photoURL: '' }
+              ],
+              createdAt: serverTimestamp(),
+              started: true,
+              phase: 'ICEBREAKER', // Initialize phase so timer starts
+              status: 'active'
+          });
+          
+          setPartner(botPartner);
+          setSessionId(testSessionId);
+          setCurrentScreen(Screen.SESSION); // Skip matching & negotiation
+      } catch (e) {
+          console.error("Failed to create test session:", e);
+          alert("Error starting test mode. Check console.");
+      }
     } else {
+      // NORMAL USER FLOW (Unchanged)
       setCurrentScreen(Screen.MATCHING);
     }
   };
@@ -102,10 +130,6 @@ export const App: React.FC = () => {
     
     setPartner(partner);
     setSessionId(sessionId);
-    
-    // Listen to the session document to know when BOTH users have matched
-    // The Matching component will handle the onMatched callback,
-    // but we need to wait for the session to transition properly
     
     // Move to negotiation immediately after match
     setCurrentScreen(Screen.NEGOTIATION);
@@ -155,13 +179,12 @@ export const App: React.FC = () => {
         />
       )}
 
-      {/* --- THIS IS THE UPDATED PART --- */}
       {currentScreen === Screen.NEGOTIATION && partner && user && (
         <Negotiation
           config={sessionConfig}
           partner={partner}
-          sessionId={sessionId!} // Added: We use ! because we know sessionId exists if we are in NEGOTIATION
-          userId={user.id}       // Added: Passing the current user ID for syncing
+          sessionId={sessionId!} 
+          userId={user.id}       
           onNegotiationComplete={handleNegotiationComplete}
           onSkipMatch={handleCancelMatch}
         />

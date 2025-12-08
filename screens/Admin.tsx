@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../utils/firebaseConfig';
-// NEW: Added getDoc to imports
 import { collection, query, orderBy, getDocs, updateDoc, doc, limit, where, startAfter, DocumentData, QueryDocumentSnapshot, writeBatch, deleteDoc, addDoc, getDoc } from 'firebase/firestore';
 import { Report, SessionLog, ChatMessage, User } from '../types';
 import { Button } from '../components/Button';
-import { Shield, AlertTriangle, UserX, UserCheck, History, XCircle, CheckCircle, ArrowLeft, X, FileText, Download, Users, Radio, Activity, Zap, Search, ChevronDown, ArrowRight, RefreshCw, Copy, Trash2, Server, MessageSquarePlus, Send, AlertOctagon } from 'lucide-react';
+import { Shield, AlertTriangle, UserX, UserCheck, History, XCircle, CheckCircle, ArrowLeft, X, FileText, Download, Users, Radio, Activity, Zap, Search, ChevronDown, ArrowRight, RefreshCw, Copy, Trash2, Server, MessageSquarePlus, Send, AlertOctagon, Eye, EyeOff } from 'lucide-react';
 
 interface AdminProps {
     onBack: () => void;
@@ -12,7 +11,7 @@ interface AdminProps {
 
 export const Admin: React.FC<AdminProps> = ({ onBack }) => {
     // Data State
-    const [reports, setReports] = useState<any[]>([]); // Changed type to allow extra user data
+    const [reports, setReports] = useState<any[]>([]); 
     const [sessions, setSessions] = useState<SessionLog[]>([]);
     const [users, setUsers] = useState<User[]>([]);
     const [stats, setStats] = useState({ activeUsers: 0, activeSessions: 0, totalHoursFocused: 0 });
@@ -25,6 +24,9 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
     // NEW: Ban Duration State
     const [banDuration, setBanDuration] = useState(24);
 
+    // NEW: User History State (for the modal)
+    const [historyReports, setHistoryReports] = useState<any[]>([]);
+
     // Pagination
     const [lastUserDoc, setLastUserDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
     const [lastSessionDoc, setLastSessionDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
@@ -33,7 +35,7 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
     // Modal State
     const [modal, setModal] = useState<{
         isOpen: boolean;
-        type: 'BROADCAST' | 'DM' | 'BAN' | 'SESSION_DETAIL';
+        type: 'BROADCAST' | 'DM' | 'BAN' | 'SESSION_DETAIL' | 'USER_HISTORY';
         data?: any;
         title?: string;
         message?: string;
@@ -64,14 +66,14 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                 setSessions(mapSessions(snap));
             }
             else if (activeTab === 'reports') {
+                // Fetch reports
                 const reportsSnap = await getDocs(query(collection(db, 'reports'), orderBy('timestamp', 'desc')));
                 
-                // NEW: Fetch User Details for Reports
+                // Fetch User Details for Reports
                 const reportsWithUsers = await Promise.all(reportsSnap.docs.map(async (d) => {
                     const data = d.data();
                     let userData = null;
                     try {
-                        // Fetch the user details using the reportedId
                         const userSnap = await getDoc(doc(db, 'users', data.reportedId));
                         if (userSnap.exists()) {
                             userData = { ...userSnap.data(), id: userSnap.id };
@@ -82,7 +84,7 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                         ...data, 
                         id: d.id, 
                         timestamp: data.timestamp?.toMillis() || Date.now(),
-                        reportedUserObj: userData // Attach full user object
+                        reportedUserObj: userData
                     }; 
                 }));
                 setReports(reportsWithUsers);
@@ -115,30 +117,44 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
     };
 
     // --- ACTIONS ---
-    // 1. OPEN MODALS
     const openBroadcastModal = () => {
         setInputText('');
         setModal({ isOpen: true, type: 'BROADCAST', title: 'System Broadcast', message: `Send alert to ${stats.activeUsers} users?` });
     };
+    
     const openDMModal = (user: User) => {
         setInputText('');
         setModal({ isOpen: true, type: 'DM', data: user, title: 'Direct Message', message: `Send private message to ${user.name}` });
     };
+
     const openBanModal = (userId: string) => {
         setInputText('');
-        setBanDuration(24); // Reset to 24h default
+        setBanDuration(24); 
         setModal({ isOpen: true, type: 'BAN', data: userId, title: 'Ban User', message: 'Select duration and enter reason:' });
     };
+
     const openSessionModal = async (session: SessionLog) => {
         setModal({ isOpen: true, type: 'SESSION_DETAIL', data: session });
-        // Fetch chats
         const chatsSnap = await getDocs(query(collection(db, 'sessions', session.id, 'messages'), orderBy('timestamp', 'asc')));
         setSessionChats(chatsSnap.docs.map(d => ({ ...d.data(), id: d.id, timestamp: d.data().timestamp?.toMillis() } as ChatMessage)));
     };
 
+    // NEW: Open User History Modal
+    const openUserHistoryModal = async (user: any, userId: string) => {
+        setHistoryReports([]); // Clear previous
+        setModal({ isOpen: true, type: 'USER_HISTORY', data: { user, id: userId }, title: 'User Report History' });
+        
+        try {
+            // Fetch all reports for this specific user
+            const q = query(collection(db, 'reports'), where('reportedId', '==', userId), orderBy('timestamp', 'desc'));
+            const snap = await getDocs(q);
+            setHistoryReports(snap.docs.map(d => ({ ...d.data(), id: d.id, timestamp: d.data().timestamp?.toMillis() || Date.now() })));
+        } catch (e) { console.error(e); }
+    };
+
     // 2. EXECUTE ACTIONS
     const executeAction = async () => {
-        if (!inputText.trim() && modal.type !== 'SESSION_DETAIL') return;
+        if (!inputText.trim() && modal.type !== 'SESSION_DETAIL' && modal.type !== 'USER_HISTORY') return;
 
         try {
             if (modal.type === 'BROADCAST') {
@@ -163,17 +179,16 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
 
             if (modal.type === 'BAN') {
                 const userId = modal.data as string;
-                // NEW: Use banDuration state
                 const until = Date.now() + banDuration * 60 * 60 * 1000;
                 await updateDoc(doc(db, 'users', userId), { bannedUntil: until, banReason: inputText });
                 setUsers(prev => prev.map(u => u.id === userId ? { ...u, bannedUntil: until, banReason: inputText } : u));
             }
 
             closeModal();
-            fetchInitialData(); // Refresh to show changes if needed
+            fetchInitialData();
 
         } catch (e: any) {
-            alert(`Action Failed: ${e.message}`); // Fallback for critical errors
+            alert(`Action Failed: ${e.message}`);
         }
     };
 
@@ -184,16 +199,37 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
         } catch (e) { console.error(e); }
     };
 
-    const handleDismissReport = async (reportId: string) => {
+    // FIXED: Better Delete Handling
+    const handleDismissReport = async (reportId: string, e?: React.MouseEvent) => {
+        e?.stopPropagation(); // Prevent click from bubbling to other elements
+        
+        if (!window.confirm("Are you sure you want to delete this report?")) return;
+
+        // Optimistic update: Remove from UI immediately so it feels "working"
+        setReports(prev => prev.filter(r => r.id !== reportId));
+
         try {
             await deleteDoc(doc(db, 'reports', reportId));
-            setReports(prev => prev.filter(r => r.id !== reportId));
+        } catch (e) { 
+            console.error("Delete failed:", e);
+            fetchInitialData(); // If it fails, reload data to show it again
+        }
+    };
+
+    // NEW: Mark Report as Read/Seen
+    const handleMarkAsRead = async (reportId: string, e?: React.MouseEvent) => {
+        e?.stopPropagation();
+        // Optimistic UI update
+        setReports(prev => prev.map(r => r.id === reportId ? { ...r, read: true } : r));
+        try {
+            await updateDoc(doc(db, 'reports', reportId), { read: true });
         } catch (e) { console.error(e); }
     };
 
     const closeModal = () => {
         setModal({ isOpen: false, type: 'BROADCAST' });
         setSessionChats([]);
+        setHistoryReports([]);
     };
 
     // --- HELPERS ---
@@ -248,7 +284,6 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                     </Button>
                     <div className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 flex items-center gap-2">
                         <Server size={14} className="text-slate-500"/>
-                        {/* NEW: Removed V3.0 */}
                         <span className="text-xs font-mono text-slate-300">System</span>
                     </div>
                 </div>
@@ -275,7 +310,8 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
 
                 {/* Tab Navigation */}
                 <div className="flex gap-1 bg-slate-900/80 p-1.5 rounded-xl border border-white/5 w-fit mb-6 shadow-xl sticky top-0 z-20 backdrop-blur">
-                    <TabButton active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} icon={<AlertTriangle size={16}/>} label="Reports" count={reports.length} alert={reports.length > 0} />
+                    {/* NEW: Badge count only shows unread reports */}
+                    <TabButton active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} icon={<AlertTriangle size={16}/>} label="Reports" count={reports.filter(r => !r.read).length} alert={reports.some(r => !r.read)} />
                     <TabButton active={activeTab === 'sessions'} onClick={() => setActiveTab('sessions')} icon={<History size={16}/>} label="History" />
                     <TabButton active={activeTab === 'users'} onClick={() => setActiveTab('users')} icon={<Users size={16}/>} label="Userbase" />
                 </div>
@@ -287,8 +323,18 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                             <EmptyState icon={<Shield size={48}/>} message="System Clean. No active reports." />
                         )}
                         {reports.map((report) => (
-                            <div key={report.id} className="bg-slate-900/80 border border-red-500/20 rounded-xl p-5 shadow-lg relative overflow-hidden group hover:border-red-500/40 transition-colors">
-                                <div className="absolute top-0 left-0 w-1 h-full bg-red-500"></div>
+                            <div 
+                                key={report.id} 
+                                className={`bg-slate-900/80 border rounded-xl p-5 shadow-lg relative overflow-hidden group transition-all duration-300 ${!report.read ? 'border-blue-500/50 shadow-blue-500/10' : 'border-white/5 opacity-80 hover:opacity-100'}`}
+                            >
+                                {/* NEW: Visual indicator for Unread */}
+                                { !report.read && (
+                                    <div className="absolute top-0 right-0 bg-blue-500 text-white text-[9px] font-bold px-2 py-1 rounded-bl-lg z-10 animate-pulse">
+                                        NEW
+                                    </div>
+                                )}
+                                <div className={`absolute top-0 left-0 w-1 h-full ${!report.read ? 'bg-blue-500' : 'bg-slate-700'}`}></div>
+                                
                                 <div className="flex justify-between items-start mb-4">
                                     <div>
                                         <div className="flex items-center gap-2 mb-1">
@@ -299,20 +345,36 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                                             Reporter ID: <span className="font-mono text-white">{report.reporterId.substring(0,8)}...</span>
                                         </div>
                                     </div>
-                                    <button onClick={() => handleDismissReport(report.id)} className="p-2 text-slate-500 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"><Trash2 size={16}/></button>
+                                    <div className="flex gap-2">
+                                        {/* NEW: Mark as Read Button */}
+                                        <button 
+                                            onClick={(e) => handleMarkAsRead(report.id, e)} 
+                                            className={`p-2 rounded-lg transition-colors ${report.read ? 'text-slate-600 hover:text-white' : 'text-blue-400 hover:bg-blue-500/20'}`}
+                                            title={report.read ? "Seen" : "Mark as Seen"}
+                                        >
+                                            {report.read ? <EyeOff size={16}/> : <Eye size={16}/>}
+                                        </button>
+                                        <button 
+                                            onClick={(e) => handleDismissReport(report.id, e)} 
+                                            className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                                            title="Delete Report"
+                                        >
+                                            <Trash2 size={16}/>
+                                        </button>
+                                    </div>
                                 </div>
                                 
                                 <div className="bg-black/30 p-3 rounded-lg border border-white/5 flex items-center justify-between">
                                     <div>
                                         <div className="text-[10px] text-slate-500 uppercase font-bold">Offender</div>
-                                        {/* NEW: Clickable Name with Icon */}
+                                        {/* NEW: Click Name to Open History Modal */}
                                         <div 
                                             className="font-bold text-white text-base flex items-center gap-2 cursor-pointer hover:text-blue-400 hover:underline transition-all" 
-                                            onClick={() => report.reportedUserObj && openDMModal(report.reportedUserObj)}
-                                            title={report.reportedUserObj ? "Click to Message User" : "User not found"}
+                                            onClick={() => openUserHistoryModal(report.reportedUserObj, report.reportedId)}
+                                            title="View User History & Actions"
                                         >
                                             {report.reportedUserObj ? report.reportedUserObj.name : report.reportedId.substring(0,12)} 
-                                            {report.reportedUserObj && <MessageSquarePlus size={14} className="opacity-70" />}
+                                            <History size={14} className="opacity-70" />
                                         </div>
                                         <div className="text-[10px] font-mono text-slate-600">
                                             {report.reportedId}
@@ -443,6 +505,7 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                                 {modal.type === 'DM' && <MessageSquarePlus className="text-purple-400" size={20}/>}
                                 {modal.type === 'BAN' && <AlertOctagon className="text-red-400" size={20}/>}
                                 {modal.type === 'SESSION_DETAIL' && <FileText className="text-emerald-400" size={20}/>}
+                                {modal.type === 'USER_HISTORY' && <History className="text-orange-400" size={20}/>}
                                 {modal.type === 'SESSION_DETAIL' ? 'Session Inspector' : modal.title}
                             </h2>
                             <button onClick={closeModal} className="text-slate-500 hover:text-white transition-colors"><X size={20}/></button>
@@ -475,9 +538,44 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                                     </div>
                                     <Button onClick={downloadChatLog} variant="secondary" className="w-full text-xs"><Download size={14} className="mr-2"/> Download Log</Button>
                                 </div>
+                            ) : modal.type === 'USER_HISTORY' ? (
+                                // NEW: USER HISTORY VIEW
+                                <div className="space-y-4">
+                                    <div className="flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg border border-white/5">
+                                        <div className="w-10 h-10 bg-slate-700 rounded-full flex items-center justify-center font-bold text-white">
+                                            {modal.data.user?.name.substring(0,2).toUpperCase() || "??"}
+                                        </div>
+                                        <div>
+                                            <div className="text-white font-bold">{modal.data.user?.name || "Unknown User"}</div>
+                                            <div className="text-xs text-slate-500 font-mono">{modal.data.id}</div>
+                                        </div>
+                                        <div className="ml-auto flex gap-2">
+                                            <button onClick={() => openDMModal(modal.data.user)} className="p-2 bg-blue-500/20 text-blue-400 rounded hover:bg-blue-500/30"><MessageSquarePlus size={16}/></button>
+                                            <button onClick={() => openBanModal(modal.data.id)} className="p-2 bg-red-500/20 text-red-400 rounded hover:bg-red-500/30"><UserX size={16}/></button>
+                                        </div>
+                                    </div>
+
+                                    <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">Report History ({historyReports.length})</div>
+                                    
+                                    <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                                        {historyReports.length === 0 ? (
+                                            <div className="text-center py-8 text-slate-500 border border-dashed border-slate-700 rounded-lg">No history found.</div>
+                                        ) : historyReports.map((r, i) => (
+                                            <div key={i} className="bg-slate-950 p-3 rounded-lg border border-slate-800 flex justify-between items-center">
+                                                <div>
+                                                    <div className="text-red-400 font-bold text-xs mb-1">{r.reason}</div>
+                                                    <div className="text-[10px] text-slate-500">{new Date(r.timestamp).toLocaleString()}</div>
+                                                </div>
+                                                <div className="text-[10px] text-slate-600 font-mono">
+                                                    by {r.reporterId.substring(0,6)}...
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
                             ) : (
                                 <div className="space-y-4">
-                                    {/* NEW: Ban Duration Selector */}
+                                    {/* Ban Duration Selector */}
                                     {modal.type === 'BAN' && (
                                         <div className="bg-red-500/10 border border-red-500/20 p-3 rounded-lg mb-2">
                                             <label className="text-xs text-red-300 font-bold uppercase mb-1 block">Ban Duration</label>
@@ -508,7 +606,7 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                         </div>
 
                         {/* Modal Footer */}
-                        {modal.type !== 'SESSION_DETAIL' && (
+                        {modal.type !== 'SESSION_DETAIL' && modal.type !== 'USER_HISTORY' && (
                             <div className="p-4 border-t border-slate-800 bg-slate-950 flex justify-end gap-3">
                                 <Button variant="ghost" onClick={closeModal} className="text-slate-400">Cancel</Button>
                                 <Button 
@@ -544,7 +642,7 @@ const StatsCard = ({ icon, label, value, color }: any) => {
 const TabButton = ({ active, onClick, icon, label, count, alert }: any) => (
     <button onClick={onClick} className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${active ? 'bg-slate-800 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>
         {icon} {label}
-        {count !== undefined && <span className={`ml-1 px-1.5 py-0.5 rounded text-[10px] ${alert ? 'bg-red-500 text-white' : 'bg-slate-700'}`}>{count}</span>}
+        {count !== undefined && count > 0 && <span className={`ml-1 px-1.5 py-0.5 rounded text-[10px] ${alert ? 'bg-blue-500 text-white animate-pulse' : 'bg-slate-700'}`}>{count}</span>}
     </button>
 );
 

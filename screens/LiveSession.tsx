@@ -11,11 +11,12 @@ import { useWebRTC } from '../hooks/useWebRTC';
 import { db } from '../utils/firebaseConfig';
 
 import { collection, query, where, getDocs, updateDoc, doc, addDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
+
 interface LiveSessionProps {
   user: User;
   partner: Partner;
   config: SessionConfig;
-   sessionId: string; 
+  sessionId: string; 
   onEndSession: () => void;
 }
 
@@ -27,43 +28,57 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [startTime] = useState(Date.now());
   
   // WebRTC State
-  
   const [isInitiator, setIsInitiator] = useState(false);
   const [isReadyForWebRTC, setIsReadyForWebRTC] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
- useEffect(() => {
-    console.log("[LIVESESSION] Using session ID:", sessionId);
+
+  // --- THE FIX STARTS HERE ---
+  useEffect(() => {
+    if (!sessionId || !user.id || !partner.id) return;
+    
+    console.log("[LIVESESSION] Setting up session:", sessionId);
+
+    // Deterministically decide who is the caller.
+    // Use alphabetical order: If MyID < PartnerID, I am the caller.
+    const amICaller = user.id < partner.id;
+    console.log(`[LIVESESSION] Role: ${amICaller ? 'CALLER (Initiator)' : 'CALLEE (Listener)'}`);
+    
+    setIsInitiator(amICaller);
     setIsReadyForWebRTC(true);
     setSessionReady(true);
-  }, [sessionId]);
-  // Initialize Session: Get ID and determine who calls whom
+  }, [sessionId, user.id, partner.id]);
+  // --- THE FIX ENDS HERE ---
   
   // Hook handles the heavy lifting of P2P connection
+  // Ensure you are using the FIXED useWebRTC hook I gave you previously!
   const { localStream, remoteStream } = useWebRTC(isReadyForWebRTC ? sessionId : '', user.id, isInitiator);
 
- // UI State
-const [micEnabled, setMicEnabled] = useState(true);
-const [camEnabled, setCamEnabled] = useState(true);
-const [manualMicToggle, setManualMicToggle] = useState(true);
+  // UI State
+  const [micEnabled, setMicEnabled] = useState(true);
+  const [camEnabled, setCamEnabled] = useState(true);
+  const [manualMicToggle, setManualMicToggle] = useState(true);
   
   const [icebreaker, setIcebreaker] = useState<string | null>(null);
   const [isLoadingIcebreaker, setIsLoadingIcebreaker] = useState(false);
+
   // Exit confirmation handler
-const handleExitSession = () => {
+  const handleExitSession = () => {
     if (confirm("Are you sure you want to leave this session? This will end it for both participants.")) {
         finishSession(true);
     }
-};
-const { messages: chatMessages, sendMessage } = useChat(
+  };
+
+  const { messages: chatMessages, sendMessage } = useChat(
     sessionReady ? sessionId : '', 
     user.id, 
     user.name
-);
+  );
+  
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   
-// Track chat messages for unread count
-useEffect(() => {
+  // Track chat messages for unread count
+  useEffect(() => {
     if (!isChatOpen && chatMessages.length > 0) {
         const lastMsg = chatMessages[chatMessages.length - 1];
         if (lastMsg.senderId !== 'me') {
@@ -73,12 +88,14 @@ useEffect(() => {
     if (isChatOpen) {
         setUnreadChatCount(0);
     }
-}, [chatMessages, isChatOpen]);
+  }, [chatMessages, isChatOpen]);
+
   const [isTaskBoardOpen, setIsTaskBoardOpen] = useState(false);
   const [myTasks, setMyTasks] = useState<TodoItem[]>([]);
   const [partnerTasks, setPartnerTasks] = useState<TodoItem[]>([]);
-// Sync tasks to Firestore
-useEffect(() => {
+
+  // Sync tasks to Firestore
+  useEffect(() => {
     if (!sessionId || !isReadyForWebRTC) return;
     
     // Listen to partner's tasks
@@ -94,60 +111,67 @@ useEffect(() => {
     });
     
     return () => unsubscribe();
-}, [sessionId, isReadyForWebRTC, user.id]);
+  }, [sessionId, isReadyForWebRTC, user.id]);
+
   const myVideoRef = useRef<HTMLVideoElement>(null);
   const partnerVideoRef = useRef<HTMLVideoElement>(null);
 
   // Attach Streams to Video Elements
   useEffect(() => {
       if (myVideoRef.current && localStream) {
+          console.log("[LIVESESSION] Attaching LOCAL stream");
           myVideoRef.current.srcObject = localStream;
       }
       if (partnerVideoRef.current && remoteStream) {
+          console.log("[LIVESESSION] Attaching REMOTE stream");
           partnerVideoRef.current.srcObject = remoteStream;
       }
   }, [localStream, remoteStream]);
 
   // Media Toggle Handling - Force mute during Focus phase
-useEffect(() => {
+  useEffect(() => {
     if(localStream) {
         // During FOCUS phase, ALWAYS mute mic regardless of user preference
         const shouldMute = phase === SessionPhase.FOCUS ? false : micEnabled;
         localStream.getAudioTracks().forEach(track => track.enabled = shouldMute);
         localStream.getVideoTracks().forEach(track => track.enabled = camEnabled);
     }
-}, [micEnabled, camEnabled, localStream, phase]);
+  }, [micEnabled, camEnabled, localStream, phase]);
 
 
   // Timer Logic
   useEffect(() => {
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
-        if (prev <= 1) return handlePhaseTransition();
+        if (prev <= 1) {
+            handlePhaseTransition();
+            return 0; // Prevent negative numbers
+        }
         return prev - 1;
       });
     }, 1000);
     return () => clearInterval(timer);
   }, [phase, config.duration]);
 
- const handlePhaseTransition = () => {
-  if (phase === SessionPhase.ICEBREAKER) {
-      setPhase(SessionPhase.FOCUS);
-      setMicEnabled(false); // Force mute
-      setManualMicToggle(false); // Remember user preference
-        return isTest ? 30 : (config.duration - config.preTalkMinutes - config.postTalkMinutes) * 60;
+  const handlePhaseTransition = () => {
+    if (phase === SessionPhase.ICEBREAKER) {
+        setPhase(SessionPhase.FOCUS);
+        setMicEnabled(false); // Force mute
+        setManualMicToggle(false); // Remember user preference
+        setTimeLeft(isTest ? 30 : (config.duration - config.preTalkMinutes - config.postTalkMinutes) * 60);
+        return;
     }
-  if (phase === SessionPhase.FOCUS) {
-    setPhase(SessionPhase.DEBRIEF);
-    setMicEnabled(manualMicToggle); // Restore user preference
-        return isTest ? 30 : config.postTalkMinutes * 60;
+    if (phase === SessionPhase.FOCUS) {
+        setPhase(SessionPhase.DEBRIEF);
+        setMicEnabled(manualMicToggle); // Restore user preference
+        setTimeLeft(isTest ? 30 : config.postTalkMinutes * 60);
+        return;
     }
     if (phase === SessionPhase.DEBRIEF) {
         setPhase(SessionPhase.COMPLETED);
         finishSession(false);
-        return 0;
+        return;
     }
-    return 0;
   };
 
   const handleGetIcebreaker = async () => {
@@ -158,39 +182,39 @@ useEffect(() => {
   };
 
   const finishSession = async (isEarlyExit: boolean) => {
-  console.log("Finishing session:", sessionId, "Early exit:", isEarlyExit);
-  
-  // Stop all media streams
-  if (localStream) {
-      localStream.getTracks().forEach(track => {
-          track.stop();
-          console.log("Stopped track:", track.kind);
-      });
-  }
-  
-  // Update database
-  if (sessionId) {
-      try {
-          await updateDoc(doc(db, 'sessions', sessionId), {
-              status: isEarlyExit ? 'aborted' : 'completed',
-              endedAt: new Date(),
-              abortedBy: isEarlyExit ? user.id : null
-          });
-          console.log("Session updated in database");
-      } catch(e) { 
-          console.error("Failed to update session:", e); 
-      }
-  }
+    console.log("Finishing session:", sessionId, "Early exit:", isEarlyExit);
+    
+    // Stop all media streams
+    if (localStream) {
+        localStream.getTracks().forEach(track => {
+            track.stop();
+            console.log("Stopped track:", track.kind);
+        });
+    }
+    
+    // Update database
+    if (sessionId) {
+        try {
+            await updateDoc(doc(db, 'sessions', sessionId), {
+                status: isEarlyExit ? 'aborted' : 'completed',
+                endedAt: new Date(),
+                abortedBy: isEarlyExit ? user.id : null
+            });
+            console.log("Session updated in database");
+        } catch(e) { 
+            console.error("Failed to update session:", e); 
+        }
+    }
 
-  // Always exit if early, otherwise show recap
-  if (isEarlyExit) {
-      onEndSession();
-  } else {
-      setPhase(SessionPhase.COMPLETED);
-  }
-};
+    // Always exit if early, otherwise show recap
+    if (isEarlyExit) {
+        onEndSession();
+    } else {
+        setPhase(SessionPhase.COMPLETED);
+    }
+  };
 
- const handleAddTask = async (text: string) => {
+  const handleAddTask = async (text: string) => {
     const newTask: TodoItem = { 
         id: Math.random().toString(), 
         text, 
@@ -208,8 +232,9 @@ useEffect(() => {
             console.error("Failed to save task:", e);
         }
     }
-};
-const handleToggleTask = async (taskId: string) => {
+  };
+
+  const handleToggleTask = async (taskId: string) => {
     const updatedTasks = myTasks.map(t => 
         t.id === taskId ? { ...t, completed: !t.completed } : t
     );
@@ -231,7 +256,8 @@ const handleToggleTask = async (taskId: string) => {
             }
         }
     }
-};
+  };
+
   const handleDeleteTask = async (taskId: string) => {
     setMyTasks(myTasks.filter(t => t.id !== taskId));
     
@@ -248,7 +274,7 @@ const handleToggleTask = async (taskId: string) => {
             console.error("Failed to delete task:", e);
         }
     }
-};
+  };
 
   return (
     <div className="flex-1 relative bg-black overflow-hidden">
@@ -323,24 +349,24 @@ const handleToggleTask = async (taskId: string) => {
                  </div>
              )}
              <button 
-    onClick={() => {
-        if (phase === SessionPhase.FOCUS) return; // Prevent toggle during focus
-        setMicEnabled(!micEnabled);
-        setManualMicToggle(!micEnabled);
-    }} 
-    disabled={phase === SessionPhase.FOCUS}
-    className={`p-4 rounded-full ${
-        phase === SessionPhase.FOCUS 
-            ? 'bg-slate-900 text-slate-600 cursor-not-allowed' 
-            : micEnabled 
-                ? 'bg-slate-800 text-white hover:bg-slate-700' 
-                : 'bg-red-500/20 text-red-500 hover:bg-red-500/30'
-    } transition-colors`}
-    title={phase === SessionPhase.FOCUS ? "Muted during Focus phase" : "Toggle microphone"}
->
-    {micEnabled && phase !== SessionPhase.FOCUS ? <Mic /> : <MicOff />}
-    {phase === SessionPhase.FOCUS && <Lock size={12} className="absolute top-1 right-1" />}
-</button>
+                onClick={() => {
+                    if (phase === SessionPhase.FOCUS) return; 
+                    setMicEnabled(!micEnabled);
+                    setManualMicToggle(!micEnabled);
+                }} 
+                disabled={phase === SessionPhase.FOCUS}
+                className={`p-4 rounded-full ${
+                    phase === SessionPhase.FOCUS 
+                        ? 'bg-slate-900 text-slate-600 cursor-not-allowed' 
+                        : micEnabled 
+                            ? 'bg-slate-800 text-white hover:bg-slate-700' 
+                            : 'bg-red-500/20 text-red-500 hover:bg-red-500/30'
+                } transition-colors`}
+                title={phase === SessionPhase.FOCUS ? "Muted during Focus phase" : "Toggle microphone"}
+            >
+                {micEnabled && phase !== SessionPhase.FOCUS ? <Mic /> : <MicOff />}
+                {phase === SessionPhase.FOCUS && <Lock size={12} className="absolute top-1 right-1" />}
+            </button>
              <button onClick={() => setCamEnabled(!camEnabled)} className={`p-4 rounded-full ${camEnabled ? 'bg-slate-800 text-white' : 'bg-red-500/20 text-red-500'}`}>{camEnabled ? <Video /> : <VideoOff />}</button>
              <button onClick={() => { setIsChatOpen(!isChatOpen); setUnreadChatCount(0); }} className="p-4 rounded-full bg-slate-800 text-white relative">
                 <MessageSquare />

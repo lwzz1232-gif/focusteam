@@ -40,7 +40,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [isTaskBoardOpen, setIsTaskBoardOpen] = useState(false);
   const [showUI, setShowUI] = useState(true); // Zen Mode
-  const [floatingEmojis, setFloatingEmojis] = useState<{id: number, emoji: string, left: number}[]>([]); // Reactions
+  const [floatingEmojis, setFloatingEmojis] = useState<{id: number, emoji: string, left: number}[]>([]); 
 
   // Draggable Self-Video State
   const [selfPos, setSelfPos] = useState({ x: 20, y: 20 });
@@ -74,7 +74,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
         if (!docSnap.exists()) return;
         const data = docSnap.data();
 
-        // Phase Sync
         if (data.phase && data.phase !== phase) {
             setPhase(data.phase as SessionPhase);
             if (data.phase === SessionPhase.FOCUS) {
@@ -90,15 +89,12 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             }
         }
 
-        // Reaction Sync (Check for new reaction timestamp)
         if (data.lastReaction && data.lastReaction.senderId !== user.id) {
-            // Only show if it's recent (within 2s) to avoid spam on reload
             if (Date.now() - data.lastReaction.timestamp < 2000) {
                 triggerLocalReaction(data.lastReaction.emoji);
             }
         }
 
-        // Status Check
         if ((data.status === 'completed' || data.status === 'aborted') && data.abortedBy && data.abortedBy !== user.id) {
             alert("Partner ended the session.");
             onEndSession();
@@ -108,7 +104,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, user.id, config, isTest]); 
 
-  // --- 3. ZEN MODE LOGIC ---
+  // --- 3. ZEN MODE ---
   useEffect(() => {
       const handleMouseMove = () => {
           setShowUI(true);
@@ -117,7 +113,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
               controlsTimeoutRef.current = setTimeout(() => setShowUI(false), 3000);
           }
       };
-
       window.addEventListener('mousemove', handleMouseMove);
       return () => {
           window.removeEventListener('mousemove', handleMouseMove);
@@ -125,7 +120,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       };
   }, [phase]);
 
-  // --- 4. TIMER & ACTIONS ---
+  // --- 4. TIMER ---
   useEffect(() => {
     if (phase === SessionPhase.COMPLETED) return;
     const timer = setInterval(() => {
@@ -147,7 +142,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   };
 
   const handleReaction = async (emoji: string) => {
-      triggerLocalReaction(emoji); // Show locally instantly
+      triggerLocalReaction(emoji);
       await updateDoc(doc(db, 'sessions', sessionId), {
           lastReaction: { emoji, senderId: user.id, timestamp: Date.now() }
       }).catch(console.error);
@@ -155,7 +150,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
   const triggerLocalReaction = (emoji: string) => {
       const id = Date.now();
-      const left = Math.random() * 80 + 10; // Random horizontal position
+      const left = Math.random() * 80 + 10;
       setFloatingEmojis(prev => [...prev, { id, emoji, left }]);
       setTimeout(() => setFloatingEmojis(prev => prev.filter(e => e.id !== id)), 2000);
   };
@@ -190,7 +185,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     return () => unsub();
   }, [sessionId, user.id]);
 
-  // --- DRAG LOGIC (Custom implementation to avoid heavy libraries) ---
+  // --- DRAG ---
   const handleMouseDown = (e: React.MouseEvent) => {
       setIsDragging(true);
       dragStart.current = { x: e.clientX - selfPos.x, y: e.clientY - selfPos.y };
@@ -213,7 +208,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       };
   }, [isDragging]);
 
-  // --- TASK HANDLERS ---
+  // --- HANDLERS ---
   const handleAddTask = async (text: string) => {
     const newTask = { text, completed: false, ownerId: user.id, createdAt: serverTimestamp() };
     const docRef = await addDoc(collection(db, 'sessions', sessionId, 'tasks'), newTask);
@@ -239,21 +234,25 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
   const getPhaseColor = () => {
       if (phase === SessionPhase.ICEBREAKER) return 'from-cyan-500/20 via-blue-500/10 to-transparent';
-      if (phase === SessionPhase.FOCUS) return 'from-purple-900/30 via-indigo-900/20 to-black'; // Darker for focus
+      if (phase === SessionPhase.FOCUS) return 'from-purple-900/30 via-indigo-900/20 to-black'; 
       return 'from-orange-500/20 via-amber-500/10 to-transparent';
   };
 
   return (
-    <div className="relative h-screen w-screen bg-black overflow-hidden select-none">
+    // FIX 1: changed from h-screen w-screen to absolute inset-0 to fit inside Layout
+    <div className="absolute inset-0 bg-black overflow-hidden select-none">
+      
       {phase === SessionPhase.COMPLETED && (
-          <SessionRecap user={user} partner={partner} duration={(Date.now() - startTime) / 60000} tasks={myTasks} onClose={onEndSession}/>
+          <div className="absolute inset-0 z-50">
+            <SessionRecap user={user} partner={partner} duration={(Date.now() - startTime) / 60000} tasks={myTasks} onClose={onEndSession}/>
+          </div>
       )}
 
-      {/* --- LAYER 1: AMBIENT GLOW --- */}
+      {/* --- LAYER 1: AMBIENT GLOW (Z-0) --- */}
       <div className={`absolute inset-0 bg-gradient-to-b ${getPhaseColor()} transition-colors duration-[2000ms] pointer-events-none z-0`}></div>
 
-      {/* --- LAYER 2: PARTNER VIDEO (FULL SCREEN) --- */}
-      <div className="absolute inset-0 z-0">
+      {/* --- LAYER 2: PARTNER VIDEO (Z-10) --- */}
+      <div className="absolute inset-0 z-10">
           {remoteStream ? (
               <video ref={partnerVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
           ) : (
@@ -262,14 +261,14 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                       <div className="absolute inset-0 bg-blue-500 blur-xl opacity-20 animate-pulse"></div>
                       <UserIcon size={64} className="text-slate-700 relative z-10" />
                   </div>
-                  <span className="text-slate-500 font-medium animate-pulse">Establishing secure link...</span>
+                  <span className="text-slate-500 font-medium animate-pulse">Establishing link...</span>
               </div>
           )}
-          {/* Phase Overlay (Darken during Focus) */}
-          <div className={`absolute inset-0 bg-black/40 transition-opacity duration-1000 ${phase === SessionPhase.FOCUS ? 'opacity-60 backdrop-grayscale-[30%]' : 'opacity-0'}`}></div>
+          {/* Phase Overlay */}
+          <div className={`absolute inset-0 bg-black/40 transition-opacity duration-1000 pointer-events-none ${phase === SessionPhase.FOCUS ? 'opacity-60 backdrop-grayscale-[30%]' : 'opacity-0'}`}></div>
       </div>
 
-      {/* --- LAYER 3: FLOATING REACTIONS --- */}
+      {/* --- LAYER 3: FLOATING REACTIONS (Z-20) --- */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden z-20">
           {floatingEmojis.map(e => (
               <div 
@@ -282,7 +281,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           ))}
       </div>
 
-      {/* --- LAYER 4: SELF VIDEO (DRAGGABLE PIP) --- */}
+      {/* --- LAYER 4: SELF VIDEO PIP (Z-30) --- */}
       <div 
         onMouseDown={handleMouseDown}
         style={{ transform: `translate(${selfPos.x}px, ${selfPos.y}px)` }}
@@ -295,10 +294,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           </div>
       </div>
 
-      {/* --- LAYER 5: UI CONTROLS (FADE IN/OUT) --- */}
+      {/* --- LAYER 5: UI CONTROLS (Z-40) --- */}
       <div className={`absolute inset-0 pointer-events-none z-40 transition-opacity duration-500 ${showUI ? 'opacity-100' : 'opacity-0'}`}>
         
-        {/* Top Bar */}
         <div className="absolute top-6 left-0 right-0 flex justify-center pointer-events-none">
             <div className={`backdrop-blur-md border rounded-full px-6 py-2 flex items-center gap-4 shadow-xl transition-all duration-500 ${phase === SessionPhase.FOCUS ? 'bg-black/60 border-red-500/30' : 'bg-slate-900/80 border-slate-700'}`}>
                 <span className={`text-xs font-bold uppercase tracking-wider ${phase === SessionPhase.FOCUS ? 'text-red-400' : 'text-slate-400'}`}>{phase}</span>
@@ -309,30 +307,24 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             </div>
         </div>
 
-        {/* Exit Button */}
         <div className="absolute top-6 right-6 pointer-events-auto">
             <Button variant="danger" onClick={() => confirm("Exit session?") && finishSession(true)} className="py-2 px-3 text-xs bg-red-500/20 hover:bg-red-500/30 border-red-500/50 backdrop-blur-md">
                 <LogOut size={14} className="mr-2"/> Exit
             </Button>
         </div>
 
-        {/* Floating Windows (Chat/Tasks) */}
         <div className="pointer-events-auto">
              <ChatWindow messages={chatMessages} onSendMessage={sendMessage} partnerName={partner.name} isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
              <TaskBoard isOpen={isTaskBoardOpen} onClose={() => setIsTaskBoardOpen(false)} myTasks={myTasks} partnerTasks={partnerTasks} onAddTask={handleAddTask} onToggleTask={handleToggleTask} onDeleteTask={handleDeleteTask} isRevealed={phase !== SessionPhase.FOCUS} canEdit={phase === SessionPhase.ICEBREAKER} partnerName={partner.name} />
         </div>
 
-        {/* Bottom Control Bar */}
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-4 pointer-events-auto">
-             
-             {/* Reaction Bar (New) */}
              <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700 rounded-full px-4 py-2 flex items-center gap-2 mr-4 shadow-lg">
                  <button onClick={() => handleReaction('🔥')} className="hover:scale-125 transition-transform text-xl">🔥</button>
                  <button onClick={() => handleReaction('💯')} className="hover:scale-125 transition-transform text-xl">💯</button>
                  <button onClick={() => handleReaction('👋')} className="hover:scale-125 transition-transform text-xl">👋</button>
              </div>
 
-             {/* Main Controls */}
              <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700 rounded-full p-2 flex items-center gap-2 shadow-2xl">
                 {phase === SessionPhase.ICEBREAKER && (
                     <Button onClick={async () => { setIsLoadingIcebreaker(true); setIcebreaker(await generateIcebreaker(partner.type)); setIsLoadingIcebreaker(false); }} variant="ghost" className="rounded-full w-10 h-10 p-0 text-yellow-400 hover:bg-yellow-400/10" title="Icebreaker">
@@ -361,7 +353,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
              </div>
         </div>
 
-        {/* Icebreaker Popup */}
         {icebreaker && (
             <div className="absolute bottom-32 left-1/2 -translate-x-1/2 bg-slate-900/95 border border-yellow-500/30 text-yellow-100 px-6 py-4 rounded-2xl shadow-2xl max-w-md text-center pointer-events-auto animate-in slide-in-from-bottom-4">
                 <p className="text-sm font-medium">✨ {icebreaker}</p>

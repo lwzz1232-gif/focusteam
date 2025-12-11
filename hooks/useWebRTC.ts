@@ -5,20 +5,26 @@ import { collection, doc, onSnapshot, updateDoc, addDoc } from 'firebase/firesto
 // FIX 1: Use ALL Google STUN servers (Redundancy)
 const SERVERS = {
   iceServers: [
-    { 
+    {
+      // Google STUN (no username/credential)
       urls: [
         'stun:stun1.l.google.com:19302',
         'stun:stun2.l.google.com:19302',
         'stun:stun3.l.google.com:19302',
         'stun:stun4.l.google.com:19302',
-
-//maybe could be deleted keep in mind this is overloaded
-          'stun:openrelay.metered.ca:80',
+      ]
+    },
+    {
+      // OpenRelay (TURN + STUN) — requires username + credential
+      urls: [
+        'stun:openrelay.metered.ca:80',
         'turn:openrelay.metered.ca:80',
         'turn:openrelay.metered.ca:443',
         'turn:openrelay.metered.ca:3478'
-      ] 
-    },
+      ],
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    }
   ],
   iceCandidatePoolSize: 10,
 };

@@ -10,8 +10,9 @@ import { Admin } from './screens/Admin';
 import { useAuth } from './hooks/useAuth';
 import { Screen, SessionConfig, Partner, SessionType, SessionDuration, SessionMode } from './types';
 import { db } from './utils/firebaseConfig';
-// Added setDoc and serverTimestamp for the Test Mode fix
 import { collection, query, where, getDocs, onSnapshot, doc, setDoc, serverTimestamp } from 'firebase/firestore';
+// NEW IMPORTS FOR LOGOUT
+import { getAuth, signOut } from 'firebase/auth'; 
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -79,6 +80,17 @@ export const App: React.FC = () => {
   const handleSplashComplete = () => {
     if (user) setCurrentScreen(Screen.DASHBOARD);
     else setCurrentScreen(Screen.LOGIN);
+  };
+
+  // --- NEW: HANDLE LOGOUT FUNCTION ---
+  const handleLogout = async () => {
+    try {
+      const auth = getAuth();
+      await signOut(auth);
+      setCurrentScreen(Screen.LOGIN);
+    } catch (error) {
+      console.error("Error signing out:", error);
+    }
   };
 
   // --- UPDATED: Async to handle Test Session Creation ---
@@ -156,7 +168,7 @@ export const App: React.FC = () => {
     <Layout
       user={user} 
       currentScreen={currentScreen}
-      onLogout={() => {}}
+      onLogout={handleLogout} // <--- CONNECTED HERE
       onAdminClick={() => setCurrentScreen(Screen.ADMIN)}
     >
       {currentScreen === Screen.SPLASH && <Splash onComplete={handleSplashComplete} />}
@@ -167,6 +179,7 @@ export const App: React.FC = () => {
         <Dashboard 
           user={user} 
           onStartMatch={handleStartMatch}
+          onLogout={handleLogout} // <--- AND CONNECTED HERE (For the button we added in Dashboard)
         />
       )}
 

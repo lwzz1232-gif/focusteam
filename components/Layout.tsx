@@ -267,6 +267,8 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, currentScreen, o
                     <div className="flex items-center gap-3">
                         <a 
                           href="https://www.instagram.com/focustwin_?igsh=MTJieG9reWh6dHl4cQ==" 
+                           target="_blank"             // new tab
+                          rel="noopener noreferrer"
                           className="group p-2 rounded-full bg-slate-900 border border-slate-800 text-slate-500 transition-all duration-300 hover:text-[#E4405F] hover:border-[#E4405F]/50 hover:bg-[#E4405F]/10 hover:shadow-[0_0_15px_rgba(228,64,95,0.4)] hover:-translate-y-1"
                           title="Instagram"
                         >

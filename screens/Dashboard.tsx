@@ -1,16 +1,17 @@
-
 import React, { useState } from 'react';
 import { Button } from '../components/Button';
 import { SessionType, SessionDuration, SessionConfig, SessionMode, User, Partner } from '../types';
-import { Briefcase, BookOpen, Code, Clock, Coffee, Play, FlaskConical } from 'lucide-react';
-import { Button } from '../components/Button';
+// ADDED: LogOut icon
+import { Briefcase, BookOpen, Code, Clock, Coffee, Play, FlaskConical, LogOut } from 'lucide-react';
 
 interface DashboardProps {
   user: User;
   onStartMatch: (config: SessionConfig) => void;
+  // ADDED: Logout prop
+  onLogout: () => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogout }) => {
   const [selectedType, setSelectedType] = useState<SessionType>(SessionType.STUDY);
   const [selectedDuration, setSelectedDuration] = useState<SessionDuration>(SessionDuration.MIN_30);
 
@@ -62,9 +63,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch }) => {
       postTalkMinutes: 5
     });
   };
+
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-4 max-w-5xl mx-auto w-full overflow-y-auto">
-      <div className="w-full mb-6 text-center md:text-left">
+    <div className="flex-1 flex flex-col items-center justify-center p-4 max-w-5xl mx-auto w-full overflow-y-auto relative">
+      
+      {/* NEW: Logout Button (Top Right) */}
+      <div className="absolute top-0 right-0 p-4">
+        <Button 
+            variant="ghost" 
+            onClick={onLogout} 
+            className="text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+        >
+            <LogOut size={18} className="mr-2"/> Logout
+        </Button>
+      </div>
+
+      <div className="w-full mb-6 text-center md:text-left pt-8">
         <h1 className="text-3xl font-bold mb-2">Configure Session</h1>
         <p className="text-slate-400">Choose your focus area and time block to find a match.</p>
       </div>

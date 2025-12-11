@@ -11,7 +11,6 @@ import { useAuth } from './hooks/useAuth';
 import { Screen, SessionConfig, Partner, SessionType, SessionDuration, SessionMode } from './types';
 import { db } from './utils/firebaseConfig';
 import { collection, query, where, getDocs, onSnapshot, doc, setDoc, serverTimestamp } from 'firebase/firestore';
-// NEW IMPORTS FOR LOGOUT
 import { getAuth, signOut } from 'firebase/auth'; 
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 
@@ -55,7 +54,39 @@ export const App: React.FC = () => {
   const [partner, setPartner] = useState<Partner | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
 
-  // Cleanup on unmount
+  // --- NEW: HANDLE LOGOUT FUNCTION ---
+  const handleLogout = async () => {
+    try {
+      const auth = getAuth();
+      await signOut(auth);
+      setPartner(null); // Clear session state
+      setSessionId(null);
+      setCurrentScreen(Screen.LOGIN);
+    } catch (error) {
+      console.error("Error signing out:", error);
+    }
+  };
+
+  // --- NEW: INSTANT BAN CHECK ---
+  // Listens to the user's document in real-time. If they get banned, kicks them out.
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const unsub = onSnapshot(doc(db, 'users', user.id), (docSnap) => {
+        if (docSnap.exists()) {
+            const data = docSnap.data();
+            // Check if banned
+            if (data.bannedUntil && data.bannedUntil > Date.now()) {
+                const reason = data.banReason || "Violation of Terms";
+                alert(`You have been banned.\nReason: ${reason}`);
+                handleLogout(); // Force logout immediately
+            }
+        }
+    });
+
+    return () => unsub(); // Cleanup listener
+  }, [user?.id]); // Re-run if user changes
+
   useEffect(() => {
     return () => {
       // Clean up any subscriptions
@@ -80,17 +111,6 @@ export const App: React.FC = () => {
   const handleSplashComplete = () => {
     if (user) setCurrentScreen(Screen.DASHBOARD);
     else setCurrentScreen(Screen.LOGIN);
-  };
-
-  // --- NEW: HANDLE LOGOUT FUNCTION ---
-  const handleLogout = async () => {
-    try {
-      const auth = getAuth();
-      await signOut(auth);
-      setCurrentScreen(Screen.LOGIN);
-    } catch (error) {
-      console.error("Error signing out:", error);
-    }
   };
 
   // --- UPDATED: Async to handle Test Session Creation ---
@@ -168,7 +188,7 @@ export const App: React.FC = () => {
     <Layout
       user={user} 
       currentScreen={currentScreen}
-      onLogout={handleLogout} // <--- CONNECTED HERE
+      onLogout={handleLogout} 
       onAdminClick={() => setCurrentScreen(Screen.ADMIN)}
     >
       {currentScreen === Screen.SPLASH && <Splash onComplete={handleSplashComplete} />}
@@ -179,7 +199,7 @@ export const App: React.FC = () => {
         <Dashboard 
           user={user} 
           onStartMatch={handleStartMatch}
-          onLogout={handleLogout} // <--- AND CONNECTED HERE (For the button we added in Dashboard)
+          onLogout={handleLogout} 
         />
       )}
 

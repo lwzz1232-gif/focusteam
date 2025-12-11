@@ -40,7 +40,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [isTaskBoardOpen, setIsTaskBoardOpen] = useState(false);
   const [showUI, setShowUI] = useState(true); 
-  const [floatingEmojis, setFloatingEmojis] = useState<{id: number, emoji: string, left: number}[]>([]); 
+  
+  // UPDATED: Added rotation and scale to state for aesthetics
+  const [floatingEmojis, setFloatingEmojis] = useState<{id: number, emoji: string, left: number, rotation: number, scale: number}[]>([]); 
 
   // Report State
   const [isReportOpen, setIsReportOpen] = useState(false);
@@ -51,6 +53,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [selfPos, setSelfPos] = useState({ x: 20, y: 20 });
   const [isDragging, setIsDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
+
+  // NEW: Anti-Spam Ref
+  const lastReactionTime = useRef<number>(0);
 
   const [myTasks, setMyTasks] = useState<TodoItem[]>([]);
   const [partnerTasks, setPartnerTasks] = useState<TodoItem[]>([]);
@@ -147,6 +152,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   };
 
   const handleReaction = async (emoji: string) => {
+      // NEW: Anti-Spam Check (800ms cooldown)
+      const now = Date.now();
+      if (now - lastReactionTime.current < 800) return; 
+      lastReactionTime.current = now;
+
       triggerLocalReaction(emoji);
       await updateDoc(doc(db, 'sessions', sessionId), {
           lastReaction: { emoji, senderId: user.id, timestamp: Date.now() }
@@ -155,9 +165,13 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
   const triggerLocalReaction = (emoji: string) => {
       const id = Date.now();
-      const left = Math.random() * 80 + 10;
-      setFloatingEmojis(prev => [...prev, { id, emoji, left }]);
-      setTimeout(() => setFloatingEmojis(prev => prev.filter(e => e.id !== id)), 2000);
+      const left = Math.random() * 60 + 20; // Keep roughly central (20% - 80%)
+      // NEW: Aesthetic random rotation and scale
+      const rotation = Math.random() * 30 - 15; // -15deg to +15deg
+      const scale = Math.random() * 0.5 + 1; // 1x to 1.5x size
+      
+      setFloatingEmojis(prev => [...prev, { id, emoji, left, rotation, scale }]);
+      setTimeout(() => setFloatingEmojis(prev => prev.filter(e => e.id !== id)), 2500);
   };
 
   // --- 5. REPORT ---
@@ -189,12 +203,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           myVideoRef.current.srcObject = localStream;
       }
       
-      // 2. Handle Remote Stream (FIXED: Added explicit play and error handling)
+      // 2. Handle Remote Stream
       if (partnerVideoRef.current && remoteStream) {
           console.log("Attaching remote stream to video element:", remoteStream.id);
           partnerVideoRef.current.srcObject = remoteStream;
           
-          // Force play if autoplay fails
           partnerVideoRef.current.play().catch(e => {
               console.error("Autoplay failed, attempting manual play", e);
           });
@@ -281,6 +294,15 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   return (
     <div className="absolute inset-0 bg-black overflow-hidden select-none">
       
+      {/* ADDED: Custom Keyframe for the floating animation if not present in global css */}
+      <style>{`
+        @keyframes aestheticFloat {
+          0% { transform: translateY(0) scale(0.8); opacity: 0; }
+          10% { transform: translateY(-20px) scale(1.1); opacity: 1; }
+          100% { transform: translateY(-150px) scale(1); opacity: 0; }
+        }
+      `}</style>
+      
       {phase === SessionPhase.COMPLETED && (
           <div className="absolute inset-0 z-50">
             <SessionRecap user={user} partner={partner} duration={(Date.now() - startTime) / 60000} tasks={myTasks} onClose={onEndSession}/>
@@ -290,14 +312,13 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       {/* --- LAYER 1: AMBIENT GLOW --- */}
       <div className={`absolute inset-0 bg-gradient-to-b ${getPhaseColor()} transition-colors duration-[2000ms] pointer-events-none z-0`}></div>
 
-      {/* --- LAYER 2: PARTNER VIDEO (FULL SCREEN) - UPDATED WITH SCALE EFFECT --- */}
+      {/* --- LAYER 2: PARTNER VIDEO --- */}
       <div className={`absolute inset-0 z-10 transition-all duration-1000 ease-in-out ${phase === SessionPhase.FOCUS ? 'scale-95 rounded-3xl overflow-hidden shadow-2xl border border-white/5' : ''}`}>
           {remoteStream ? (
               <video 
                 ref={partnerVideoRef} 
                 autoPlay 
                 playsInline 
-                // ADDED: ensures video plays when data arrives
                 onLoadedMetadata={(e) => (e.target as HTMLVideoElement).play()}
                 className="w-full h-full object-cover" 
               />
@@ -310,24 +331,28 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                   <span className="text-slate-500 font-medium animate-pulse">Establishing link...</span>
               </div>
           )}
-          {/* Phase Overlay (Darken during Focus) */}
           <div className={`absolute inset-0 bg-black/40 transition-opacity duration-1000 pointer-events-none ${phase === SessionPhase.FOCUS ? 'opacity-60 backdrop-grayscale-[30%]' : 'opacity-0'}`}></div>
       </div>
 
-      {/* --- LAYER 3: FLOATING REACTIONS --- */}
+      {/* --- LAYER 3: FLOATING REACTIONS (UPDATED) --- */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden z-20">
           {floatingEmojis.map(e => (
               <div 
                 key={e.id} 
-                className="absolute bottom-20 text-4xl animate-[floatUp_2s_ease-out_forwards]"
-                style={{ left: `${e.left}%` }}
+                className="absolute bottom-28 text-5xl pointer-events-none select-none drop-shadow-[0_4px_8px_rgba(0,0,0,0.5)]"
+                style={{ 
+                    left: `${e.left}%`,
+                    // We combine the CSS animation with the dynamic rotation logic
+                    animation: 'aestheticFloat 2.5s ease-out forwards',
+                    transform: `rotate(${e.rotation}deg)` 
+                }}
               >
                   {e.emoji}
               </div>
           ))}
       </div>
 
-      {/* --- LAYER 4: SELF VIDEO (DRAGGABLE PIP) --- */}
+      {/* --- LAYER 4: SELF VIDEO --- */}
       <div 
         onMouseDown={handleMouseDown}
         style={{ transform: `translate(${selfPos.x}px, ${selfPos.y}px)` }}
@@ -354,7 +379,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             </div>
         </div>
 
-        {/* Report Button (NEW) */}
+        {/* Report Button */}
         <div className="absolute top-6 left-6 pointer-events-auto">
             <button 
                 onClick={() => setIsReportOpen(true)} 
@@ -378,12 +403,21 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
              <TaskBoard isOpen={isTaskBoardOpen} onClose={() => setIsTaskBoardOpen(false)} myTasks={myTasks} partnerTasks={partnerTasks} onAddTask={handleAddTask} onToggleTask={handleToggleTask} onDeleteTask={handleDeleteTask} isRevealed={phase !== SessionPhase.FOCUS} canEdit={phase === SessionPhase.ICEBREAKER} partnerName={partner.name} />
         </div>
 
-        {/* Bottom Control Bar */}
+        {/* Bottom Control Bar (UPDATED BUTTONS) */}
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-4 pointer-events-auto">
-             <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700 rounded-full px-4 py-2 flex items-center gap-2 mr-4 shadow-lg">
-                 <button onClick={() => handleReaction('🔥')} className="hover:scale-125 transition-transform text-xl">🔥</button>
-                 <button onClick={() => handleReaction('💯')} className="hover:scale-125 transition-transform text-xl">💯</button>
-                 <button onClick={() => handleReaction('👋')} className="hover:scale-125 transition-transform text-xl">👋</button>
+             <div className="bg-slate-900/80 backdrop-blur-xl border border-white/10 rounded-full px-4 py-2 flex items-center gap-3 mr-4 shadow-2xl">
+                 <button 
+                    onClick={() => handleReaction('🔥')} 
+                    className="hover:bg-orange-500/20 hover:scale-110 active:scale-95 transition-all p-2 rounded-full text-2xl"
+                 >🔥</button>
+                 <button 
+                    onClick={() => handleReaction('💯')} 
+                    className="hover:bg-red-500/20 hover:scale-110 active:scale-95 transition-all p-2 rounded-full text-2xl"
+                 >💯</button>
+                 <button 
+                    onClick={() => handleReaction('👋')} 
+                    className="hover:bg-blue-500/20 hover:scale-110 active:scale-95 transition-all p-2 rounded-full text-2xl"
+                 >👋</button>
              </div>
 
              <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700 rounded-full p-2 flex items-center gap-2 shadow-2xl">
@@ -421,7 +455,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             </div>
         )}
 
-        {/* Report Modal (NEW) */}
         {isReportOpen && (
             <div className="absolute inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
                 <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4 pointer-events-auto">

@@ -232,10 +232,15 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, currentScreen, o
                </button>
               )}
 
+              {/* FIX: Made the button more explicit and prevent event bubbling issues */}
               {showLogout && (
                 <button 
-                  onClick={onLogout}
-                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-full transition-colors"
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onLogout();
+                  }}
+                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-full transition-colors cursor-pointer"
                   title="Logout"
                 >
                   <LogOut size={20} />

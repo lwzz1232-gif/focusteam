@@ -42,8 +42,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [showUI, setShowUI] = useState(true); 
   const [floatingEmojis, setFloatingEmojis] = useState<{id: number, emoji: string, left: number, rotation: number, scale: number}[]>([]); 
 
-  // EXIT MODAL STATE (NEW)
-  const [exitModalStep, setExitModalStep] = useState<0 | 1 | 2>(0); // 0=Closed, 1=Empathy, 2=Strike Warning
+  // EXIT MODAL STATE
+  const [exitModalStep, setExitModalStep] = useState<0 | 1 | 2>(0); 
 
   // Report State
   const [isReportOpen, setIsReportOpen] = useState(false);
@@ -274,34 +274,26 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     else setPhase(SessionPhase.COMPLETED);
   };
 
-  // --- NEW: HANDLE SMART EXIT BUTTON ---
+  // --- UPDATED: HANDLE EXIT WITH 2-STEP MODAL (NO IMMUNITY FOR TESTING) ---
   const handleExitClick = () => {
-    // 1. ADMIN IMMUNITY CHECK
-    if (user.role === 'admin' || user.role === 'dev') {
-        finishSession(true);
-        return;
-    }
-
-    // 2. If During FOCUS Phase, Trigger 2-Step Modal
+    // Check Phase
     if (phase === SessionPhase.FOCUS) {
-        setExitModalStep(1); // Start Stage 1 (Empathy)
-    } 
-    // 3. Safe Exit (Icebreaker/Debrief)
-    else {
+        setExitModalStep(1); // Trigger Stage 1 Modal
+    } else {
+        // Simple confirm for non-focus phases
         if (confirm("Exit session?")) {
             finishSession(true);
         }
     }
   };
 
-  // --- NEW: CONFIRM EXIT WITH STRIKE ---
   const confirmExitWithStrike = async () => {
+      // Add strike logic
       try {
           await updateDoc(doc(db, 'users', user.id), {
               strikes: increment(1),
               lastStrikeAt: Date.now()
           });
-          // Check for visual feedback if needed, but we exit immediately
       } catch (e) {
           console.error("Error applying strike:", e);
       }
@@ -331,10 +323,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           </div>
       )}
 
-      {/* --- LAYER 1: AMBIENT GLOW --- */}
       <div className={`absolute inset-0 bg-gradient-to-b ${getPhaseColor()} transition-colors duration-[2000ms] pointer-events-none z-0`}></div>
 
-      {/* --- LAYER 2: PARTNER VIDEO --- */}
       <div className={`absolute inset-0 z-10 transition-all duration-1000 ease-in-out ${phase === SessionPhase.FOCUS ? 'scale-95 rounded-3xl overflow-hidden shadow-2xl border border-white/5' : ''}`}>
           {remoteStream ? (
               <video 
@@ -356,7 +346,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           <div className={`absolute inset-0 bg-black/40 transition-opacity duration-1000 pointer-events-none ${phase === SessionPhase.FOCUS ? 'opacity-60 backdrop-grayscale-[30%]' : 'opacity-0'}`}></div>
       </div>
 
-      {/* --- LAYER 3: FLOATING REACTIONS --- */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden z-20">
           {floatingEmojis.map(e => (
               <div 
@@ -373,7 +362,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           ))}
       </div>
 
-      {/* --- LAYER 4: SELF VIDEO --- */}
       <div 
         onMouseDown={handleMouseDown}
         style={{ transform: `translate(${selfPos.x}px, ${selfPos.y}px)` }}
@@ -386,10 +374,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           </div>
       </div>
 
-      {/* --- LAYER 5: UI CONTROLS --- */}
       <div className={`absolute inset-0 pointer-events-none z-40 transition-opacity duration-500 ${showUI ? 'opacity-100' : 'opacity-0'}`}>
         
-        {/* Top Bar */}
         <div className="absolute top-6 left-0 right-0 flex justify-center pointer-events-none">
             <div className={`backdrop-blur-md border rounded-full px-6 py-2 flex items-center gap-4 shadow-xl transition-all duration-500 ${phase === SessionPhase.FOCUS ? 'bg-black/60 border-red-500/30' : 'bg-slate-900/80 border-slate-700'}`}>
                 <span className={`text-xs font-bold uppercase tracking-wider ${phase === SessionPhase.FOCUS ? 'text-red-400' : 'text-slate-400'}`}>{phase}</span>
@@ -400,7 +386,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             </div>
         </div>
 
-        {/* Report Button */}
         <div className="absolute top-6 left-6 pointer-events-auto">
             <button 
                 onClick={() => setIsReportOpen(true)} 
@@ -411,7 +396,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             </button>
         </div>
 
-        {/* Exit Button */}
+        {/* EXIT BUTTON WITH HANDLER */}
         <div className="absolute top-6 right-6 pointer-events-auto">
             <Button 
                 variant="danger" 
@@ -422,13 +407,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             </Button>
         </div>
 
-        {/* Floating Windows */}
         <div className="pointer-events-auto">
              <ChatWindow messages={chatMessages} onSendMessage={sendMessage} partnerName={partner.name} isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
              <TaskBoard isOpen={isTaskBoardOpen} onClose={() => setIsTaskBoardOpen(false)} myTasks={myTasks} partnerTasks={partnerTasks} onAddTask={handleAddTask} onToggleTask={handleToggleTask} onDeleteTask={handleDeleteTask} isRevealed={phase !== SessionPhase.FOCUS} canEdit={phase === SessionPhase.ICEBREAKER} partnerName={partner.name} />
         </div>
 
-        {/* Bottom Control Bar */}
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-4 pointer-events-auto">
              <div className="bg-slate-900/80 backdrop-blur-xl border border-white/10 rounded-full px-4 py-2 flex items-center gap-3 mr-4 shadow-2xl">
                  <button 
@@ -480,7 +463,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             </div>
         )}
 
-        {/* --- REPORT MODAL --- */}
         {isReportOpen && (
             <div className="absolute inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
                 <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4 pointer-events-auto">
@@ -524,7 +506,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             </div>
         )}
 
-        {/* --- NEW: CUSTOM EXIT MODAL (2-STAGE) --- */}
+        {/* --- EXIT MODAL (2-STAGE) --- */}
         {exitModalStep > 0 && (
             <div className="absolute inset-0 z-[70] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in zoom-in-95 duration-200 pointer-events-auto">
                 <div className="max-w-md w-full bg-slate-900 border border-white/10 rounded-2xl p-6 shadow-2xl relative overflow-hidden">

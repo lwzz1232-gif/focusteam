@@ -276,7 +276,9 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, currentScreen, o
                         </a>
 
                         <a 
-                          href="#" 
+                          href="https://www.tiktok.com/@isharethereforeiam" 
+                          target="_blank"             // new tab
+                          rel="noopener noreferrer"
                           className="group p-2 rounded-full bg-slate-900 border border-slate-800 text-slate-500 transition-all duration-300 hover:text-white hover:border-[#ff0050]/60 hover:bg-slate-900 hover:shadow-[0_0_15px_rgba(0,242,234,0.4)] hover:-translate-y-1 relative overflow-hidden"
                           title="TikTok"
                         >

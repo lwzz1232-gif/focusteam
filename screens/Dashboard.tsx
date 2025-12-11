@@ -63,8 +63,6 @@ return (
 <h1 className="text-3xl font-bold mb-2">Configure Session</h1>
 <p className="text-slate-400">Choose your focus area and time block to find a match.</p>
 </div>
-code
-Code
 <div className="grid md:grid-cols-2 gap-8 w-full mb-8">
     {/* Session Type */}
     <div className="space-y-4">

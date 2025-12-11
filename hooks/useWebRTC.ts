@@ -1,10 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { db } from '../utils/firebaseConfig';
-import { collection, doc, onSnapshot, updateDoc, addDoc, getDoc, setDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, updateDoc, addDoc } from 'firebase/firestore';
 
+// FIX 1: Use ALL Google STUN servers (Redundancy)
 const SERVERS = {
   iceServers: [
-    { urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
+    { 
+      urls: [
+        'stun:stun1.l.google.com:19302',
+        'stun:stun2.l.google.com:19302',
+        'stun:stun3.l.google.com:19302',
+        'stun:stun4.l.google.com:19302'
+      ] 
+    },
   ],
   iceCandidatePoolSize: 10,
 };
@@ -15,10 +23,10 @@ export const useWebRTC = (sessionId: string, userId: string, isInitiator: boolea
   const [connectionStatus, setConnectionStatus] = useState<'new' | 'checking' | 'connected' | 'failed' | 'disconnected' | 'closed'>('new');
   
   const pc = useRef<RTCPeerConnection | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
   
-  // We track the stream in a Ref too, to ensure we clean up the EXACT stream we created
-  // even if state updates haven't processed yet.
-  const localStreamRef = useRef<MediaStream | null>(null); 
+  // FIX 2: The Buffer Queue (This prevents the "Remote Description" error)
+  const candidateQueue = useRef<RTCIceCandidateInit[]>([]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -43,7 +51,6 @@ export const useWebRTC = (sessionId: string, userId: string, isInitiator: boolea
       pc.current.ontrack = (event) => {
         console.log('[WEBRTC] Received Remote Track');
         event.streams[0].getTracks().forEach((track) => {
-            // Only update if it's a new stream to prevent flickering
             setRemoteStream(prev => {
                 if (prev?.id === event.streams[0].id) return prev;
                 return event.streams[0];
@@ -51,21 +58,19 @@ export const useWebRTC = (sessionId: string, userId: string, isInitiator: boolea
         });
       };
 
-      // 3. Handle Local Media (Camera/Mic)
+      // 3. Handle Local Media
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         
         if (!isMounted) {
-            // Component unmounted while we were waiting for camera. Stop it immediately.
             stream.getTracks().forEach(t => t.stop());
             return;
         }
 
         console.log('[WEBRTC] Local Media Acquired');
-        localStreamRef.current = stream; // Save to ref for cleanup
-        setLocalStream(stream);          // Save to state for UI
+        localStreamRef.current = stream;
+        setLocalStream(stream);
 
-        // Add tracks to PC
         stream.getTracks().forEach((track) => {
            if (pc.current) {
              pc.current.addTrack(track, stream);
@@ -76,23 +81,53 @@ export const useWebRTC = (sessionId: string, userId: string, isInitiator: boolea
         return; 
       }
 
-      // 4. Handle ICE Candidates (Sending to Firestore)
+      // 4. Handle Local Candidates (Sending to YOUR specific collections)
       const sessionRef = doc(db, 'sessions', sessionId);
       const callerCandidatesCol = collection(sessionRef, 'callerCandidates');
       const calleeCandidatesCol = collection(sessionRef, 'calleeCandidates');
 
       pc.current.onicecandidate = (event) => {
         if (event.candidate) {
+          // Keep your exact logic here
           const targetCol = isInitiator ? callerCandidatesCol : calleeCandidatesCol;
           addDoc(targetCol, event.candidate.toJSON()).catch(e => console.error("Candidate Error", e));
         }
       };
 
-      // 5. Signaling Logic (Offer / Answer)
+      // Helper to process buffered candidates
+      const processCandidateQueue = async () => {
+          if (!pc.current || candidateQueue.current.length === 0) return;
+          console.log(`[WEBRTC] Flushing ${candidateQueue.current.length} buffered candidates`);
+          for (const candidate of candidateQueue.current) {
+              try {
+                  await pc.current.addIceCandidate(new RTCIceCandidate(candidate));
+              } catch (e) {
+                  console.error("Buffered ICE Error", e);
+              }
+          }
+          candidateQueue.current = [];
+      };
+
+      // Helper to handle incoming candidates (With Buffering)
+      const handleIncomingCandidate = (change: any) => {
+          if (change.type === 'added' && pc.current) {
+              const candidateData = change.doc.data();
+              // If we are ready, add it. If not, queue it.
+              if (pc.current.remoteDescription && pc.current.remoteDescription.type) {
+                  const candidate = new RTCIceCandidate(candidateData);
+                  pc.current.addIceCandidate(candidate).catch(e => console.warn("ICE Add Fail", e));
+              } else {
+                  candidateQueue.current.push(candidateData);
+              }
+          }
+      };
+
+      // 5. Signaling Logic
       if (isInitiator) {
         // --- CALLER ---
         console.log('[WEBRTC] Creating Offer...');
-        const offer = await pc.current.createOffer();
+        // FIX 3: Ice Restart enabled here
+        const offer = await pc.current.createOffer({ iceRestart: true });
         await pc.current.setLocalDescription(offer);
         
         await updateDoc(sessionRef, { 
@@ -106,18 +141,15 @@ export const useWebRTC = (sessionId: string, userId: string, isInitiator: boolea
             console.log('[WEBRTC] Received Answer');
             const answer = new RTCSessionDescription(data.answer);
             await pc.current.setRemoteDescription(answer);
+            // Process any candidates that arrived early
+            processCandidateQueue();
           }
         });
         unsubscribes.push(unsubSession);
 
         // Listen for Callee Candidates
         const unsubCandidates = onSnapshot(calleeCandidatesCol, (snapshot) => {
-          snapshot.docChanges().forEach((change) => {
-            if (change.type === 'added' && pc.current) {
-              const candidate = new RTCIceCandidate(change.doc.data());
-              pc.current.addIceCandidate(candidate).catch(e => console.warn("ICE Add Fail", e));
-            }
-          });
+          snapshot.docChanges().forEach(handleIncomingCandidate);
         });
         unsubscribes.push(unsubCandidates);
 
@@ -132,6 +164,9 @@ export const useWebRTC = (sessionId: string, userId: string, isInitiator: boolea
             console.log('[WEBRTC] Received Offer, Sending Answer');
             const offer = new RTCSessionDescription(data.offer);
             await pc.current.setRemoteDescription(offer);
+            
+            // Process any candidates that arrived early
+            processCandidateQueue();
 
             const answer = await pc.current.createAnswer();
             await pc.current.setLocalDescription(answer);
@@ -145,12 +180,7 @@ export const useWebRTC = (sessionId: string, userId: string, isInitiator: boolea
 
         // Listen for Caller Candidates
         const unsubCandidates = onSnapshot(callerCandidatesCol, (snapshot) => {
-          snapshot.docChanges().forEach((change) => {
-            if (change.type === 'added' && pc.current) {
-              const candidate = new RTCIceCandidate(change.doc.data());
-              pc.current.addIceCandidate(candidate).catch(e => console.warn("ICE Add Fail", e));
-            }
-          });
+          snapshot.docChanges().forEach(handleIncomingCandidate);
         });
         unsubscribes.push(unsubCandidates);
       }
@@ -158,19 +188,14 @@ export const useWebRTC = (sessionId: string, userId: string, isInitiator: boolea
 
     setupConnection();
 
-    // CLEANUP FUNCTION
     return () => {
       isMounted = false;
       console.log('[WEBRTC] Cleaning up connection');
-      
       unsubscribes.forEach(fn => fn());
-      
       if (pc.current) {
           pc.current.close();
           pc.current = null;
       }
-      
-      // Stop the specific stream stored in REF to avoid closure staleness
       if (localStreamRef.current) {
           localStreamRef.current.getTracks().forEach(t => t.stop());
           localStreamRef.current = null;

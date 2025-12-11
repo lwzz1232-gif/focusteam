@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Partner, SessionPhase, User, SessionConfig, SessionDuration, TodoItem } from '../types';
 import { Button } from '../components/Button';
 import { generateIcebreaker } from '../services/geminiService';
-import { Mic, MicOff, Video, VideoOff, Sparkles, LogOut, Lock, User as UserIcon, MessageSquare, ListChecks, ThumbsUp, Heart, Zap, Smile, Flag, X, AlertTriangle } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, Sparkles, LogOut, Lock, User as UserIcon, MessageSquare, ListChecks, ThumbsUp, Heart, Zap, Smile, Flag, X, AlertTriangle, HeartCrack } from 'lucide-react';
 import { ChatWindow } from '../components/ChatWindow';
 import { TaskBoard } from '../components/TaskBoard';
 import { SessionRecap } from '../components/SessionRecap';
@@ -41,6 +41,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [isTaskBoardOpen, setIsTaskBoardOpen] = useState(false);
   const [showUI, setShowUI] = useState(true); 
   const [floatingEmojis, setFloatingEmojis] = useState<{id: number, emoji: string, left: number, rotation: number, scale: number}[]>([]); 
+
+  // EXIT MODAL STATE (NEW)
+  const [exitModalStep, setExitModalStep] = useState<0 | 1 | 2>(0); // 0=Closed, 1=Empathy, 2=Strike Warning
 
   // Report State
   const [isReportOpen, setIsReportOpen] = useState(false);
@@ -271,45 +274,38 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     else setPhase(SessionPhase.COMPLETED);
   };
 
-  // --- NEW: HANDLE SMART EXIT WITH STRIKES ---
-  const handleExitClick = async () => {
-    // Case 1: Early Exit (During Focus Phase)
+  // --- NEW: HANDLE SMART EXIT BUTTON ---
+  const handleExitClick = () => {
+    // 1. ADMIN IMMUNITY CHECK
+    if (user.role === 'admin' || user.role === 'dev') {
+        finishSession(true);
+        return;
+    }
+
+    // 2. If During FOCUS Phase, Trigger 2-Step Modal
     if (phase === SessionPhase.FOCUS) {
-        const confirmExit = window.confirm(
-            "⚠️ WARNING: You are leaving during the Focus Phase.\n\n" + 
-            "Leaving early disrupts your partner and counts as a 'Strike' against your reliability score.\n\n" +
-            "Accumulating 3 strikes results in a temporary timeout.\n\n" +
-            "Are you sure you want to leave?"
-        );
-
-        if (confirmExit) {
-            try {
-                // Add a strike to the user's profile
-                await updateDoc(doc(db, 'users', user.id), {
-                    strikes: increment(1),
-                    lastStrikeAt: Date.now()
-                });
-                
-                // Check if they hit the ban limit (handled in background or next login, 
-                // but we can check here to be scary)
-                const userSnap = await getDoc(doc(db, 'users', user.id));
-                if (userSnap.exists() && userSnap.data().strikes >= 3) {
-                    alert("You have accumulated 3 strikes. You may be timed out from matching.");
-                }
-
-                finishSession(true);
-            } catch (e) {
-                console.error("Error applying strike:", e);
-                finishSession(true); // Let them leave anyway if DB fails
-            }
-        }
+        setExitModalStep(1); // Start Stage 1 (Empathy)
     } 
-    // Case 2: Safe Exit (Icebreaker, Debrief, or End)
+    // 3. Safe Exit (Icebreaker/Debrief)
     else {
         if (confirm("Exit session?")) {
             finishSession(true);
         }
     }
+  };
+
+  // --- NEW: CONFIRM EXIT WITH STRIKE ---
+  const confirmExitWithStrike = async () => {
+      try {
+          await updateDoc(doc(db, 'users', user.id), {
+              strikes: increment(1),
+              lastStrikeAt: Date.now()
+          });
+          // Check for visual feedback if needed, but we exit immediately
+      } catch (e) {
+          console.error("Error applying strike:", e);
+      }
+      finishSession(true);
   };
 
   const getPhaseColor = () => {
@@ -415,7 +411,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             </button>
         </div>
 
-        {/* Exit Button (UPDATED CLICK HANDLER) */}
+        {/* Exit Button */}
         <div className="absolute top-6 right-6 pointer-events-auto">
             <Button 
                 variant="danger" 
@@ -484,6 +480,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             </div>
         )}
 
+        {/* --- REPORT MODAL --- */}
         {isReportOpen && (
             <div className="absolute inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
                 <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4 pointer-events-auto">
@@ -526,6 +523,63 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                 </div>
             </div>
         )}
+
+        {/* --- NEW: CUSTOM EXIT MODAL (2-STAGE) --- */}
+        {exitModalStep > 0 && (
+            <div className="absolute inset-0 z-[70] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in zoom-in-95 duration-200 pointer-events-auto">
+                <div className="max-w-md w-full bg-slate-900 border border-white/10 rounded-2xl p-6 shadow-2xl relative overflow-hidden">
+                    
+                    {/* STAGE 1: EMPATHY */}
+                    {exitModalStep === 1 && (
+                        <div className="space-y-4 text-center">
+                            <div className="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center mx-auto mb-2">
+                                <HeartCrack size={32} className="text-blue-400" />
+                            </div>
+                            <h3 className="text-xl font-bold text-white">Wait, don't break the flow!</h3>
+                            <p className="text-slate-400 text-sm leading-relaxed">
+                                Leaving now disrupts the session rhythm for <b>{partner.name}</b>. 
+                                We strongly encourage finishing the focus block together.
+                            </p>
+                            <div className="grid grid-cols-2 gap-3 mt-6">
+                                <Button onClick={() => setExitModalStep(0)} variant="secondary" className="border-slate-700 hover:bg-slate-800">
+                                    I'll Stay
+                                </Button>
+                                <Button onClick={() => setExitModalStep(2)} className="bg-transparent border border-red-900/50 text-red-400 hover:bg-red-950 hover:text-red-300">
+                                    I Must Leave
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* STAGE 2: CONSEQUENCE */}
+                    {exitModalStep === 2 && (
+                        <div className="space-y-4 text-center animate-in slide-in-from-right-8">
+                            <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-2 border border-red-500/20">
+                                <AlertTriangle size={32} className="text-red-500" />
+                            </div>
+                            <h3 className="text-xl font-bold text-white">Warning: Reliability Strike</h3>
+                            <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-xs text-red-200 text-left">
+                                <ul className="list-disc pl-4 space-y-1">
+                                    <li>Leaving early counts as a <b>Strike</b>.</li>
+                                    <li>3 Strikes = <b>30 Minute Timeout</b>.</li>
+                                    <li>Frequent leaving may lead to a permanent ban.</li>
+                                </ul>
+                            </div>
+                            <p className="text-slate-500 text-xs">Are you absolutely sure you want to exit?</p>
+                            <div className="grid grid-cols-2 gap-3 mt-6">
+                                <Button onClick={() => setExitModalStep(0)} variant="secondary">
+                                    Go Back
+                                </Button>
+                                <Button onClick={confirmExitWithStrike} variant="danger">
+                                    Confirm Exit
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        )}
+
       </div>
     </div>
   );

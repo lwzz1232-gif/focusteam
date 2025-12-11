@@ -2,14 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Partner, SessionPhase, User, SessionConfig, SessionDuration, TodoItem } from '../types';
 import { Button } from '../components/Button';
 import { generateIcebreaker } from '../services/geminiService';
-import { Mic, MicOff, Video, VideoOff, Sparkles, LogOut, Lock, User as UserIcon, MessageSquare, ListChecks, ThumbsUp, Heart, Zap, Smile, Flag, X } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, Sparkles, LogOut, Lock, User as UserIcon, MessageSquare, ListChecks, ThumbsUp, Heart, Zap, Smile, Flag, X, AlertTriangle } from 'lucide-react';
 import { ChatWindow } from '../components/ChatWindow';
 import { TaskBoard } from '../components/TaskBoard';
 import { SessionRecap } from '../components/SessionRecap';
 import { useChat } from '../hooks/useChat'; 
 import { useWebRTC } from '../hooks/useWebRTC'; 
 import { db } from '../utils/firebaseConfig';
-import { collection, query, where, updateDoc, doc, addDoc, onSnapshot, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, updateDoc, doc, addDoc, onSnapshot, deleteDoc, serverTimestamp, increment, getDoc } from 'firebase/firestore';
 
 interface LiveSessionProps {
   user: User;
@@ -40,8 +40,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [isTaskBoardOpen, setIsTaskBoardOpen] = useState(false);
   const [showUI, setShowUI] = useState(true); 
-  
-  // UPDATED: Added rotation and scale to state for aesthetics
   const [floatingEmojis, setFloatingEmojis] = useState<{id: number, emoji: string, left: number, rotation: number, scale: number}[]>([]); 
 
   // Report State
@@ -54,7 +52,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [isDragging, setIsDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
 
-  // NEW: Anti-Spam Ref
+  // Anti-Spam Ref
   const lastReactionTime = useRef<number>(0);
 
   const [myTasks, setMyTasks] = useState<TodoItem[]>([]);
@@ -152,7 +150,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   };
 
   const handleReaction = async (emoji: string) => {
-      // NEW: Anti-Spam Check (800ms cooldown)
       const now = Date.now();
       if (now - lastReactionTime.current < 800) return; 
       lastReactionTime.current = now;
@@ -165,10 +162,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
   const triggerLocalReaction = (emoji: string) => {
       const id = Date.now();
-      const left = Math.random() * 60 + 20; // Keep roughly central (20% - 80%)
-      // NEW: Aesthetic random rotation and scale
-      const rotation = Math.random() * 30 - 15; // -15deg to +15deg
-      const scale = Math.random() * 0.5 + 1; // 1x to 1.5x size
+      const left = Math.random() * 60 + 20; 
+      const rotation = Math.random() * 30 - 15; 
+      const scale = Math.random() * 0.5 + 1; 
       
       setFloatingEmojis(prev => [...prev, { id, emoji, left, rotation, scale }]);
       setTimeout(() => setFloatingEmojis(prev => prev.filter(e => e.id !== id)), 2500);
@@ -196,21 +192,12 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       }
   };
 
-  // --- MEDIA HANDLING (FIXED) ---
+  // --- MEDIA ---
   useEffect(() => {
-      // 1. Handle Local Stream
-      if (myVideoRef.current && localStream) {
-          myVideoRef.current.srcObject = localStream;
-      }
-      
-      // 2. Handle Remote Stream
+      if (myVideoRef.current && localStream) myVideoRef.current.srcObject = localStream;
       if (partnerVideoRef.current && remoteStream) {
-          console.log("Attaching remote stream to video element:", remoteStream.id);
           partnerVideoRef.current.srcObject = remoteStream;
-          
-          partnerVideoRef.current.play().catch(e => {
-              console.error("Autoplay failed, attempting manual play", e);
-          });
+          partnerVideoRef.current.play().catch(e => console.error("Autoplay failed", e));
       }
   }, [localStream, remoteStream]);
 
@@ -250,7 +237,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           setSelfPos({ x: e.clientX - dragStart.current.x, y: e.clientY - dragStart.current.y });
       };
       const handleMouseUp = () => setIsDragging(false);
-      
       if (isDragging) {
           window.addEventListener('mousemove', handleMouseMove);
           window.addEventListener('mouseup', handleMouseUp);
@@ -285,6 +271,47 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     else setPhase(SessionPhase.COMPLETED);
   };
 
+  // --- NEW: HANDLE SMART EXIT WITH STRIKES ---
+  const handleExitClick = async () => {
+    // Case 1: Early Exit (During Focus Phase)
+    if (phase === SessionPhase.FOCUS) {
+        const confirmExit = window.confirm(
+            "⚠️ WARNING: You are leaving during the Focus Phase.\n\n" + 
+            "Leaving early disrupts your partner and counts as a 'Strike' against your reliability score.\n\n" +
+            "Accumulating 3 strikes results in a temporary timeout.\n\n" +
+            "Are you sure you want to leave?"
+        );
+
+        if (confirmExit) {
+            try {
+                // Add a strike to the user's profile
+                await updateDoc(doc(db, 'users', user.id), {
+                    strikes: increment(1),
+                    lastStrikeAt: Date.now()
+                });
+                
+                // Check if they hit the ban limit (handled in background or next login, 
+                // but we can check here to be scary)
+                const userSnap = await getDoc(doc(db, 'users', user.id));
+                if (userSnap.exists() && userSnap.data().strikes >= 3) {
+                    alert("You have accumulated 3 strikes. You may be timed out from matching.");
+                }
+
+                finishSession(true);
+            } catch (e) {
+                console.error("Error applying strike:", e);
+                finishSession(true); // Let them leave anyway if DB fails
+            }
+        }
+    } 
+    // Case 2: Safe Exit (Icebreaker, Debrief, or End)
+    else {
+        if (confirm("Exit session?")) {
+            finishSession(true);
+        }
+    }
+  };
+
   const getPhaseColor = () => {
       if (phase === SessionPhase.ICEBREAKER) return 'from-cyan-500/20 via-blue-500/10 to-transparent';
       if (phase === SessionPhase.FOCUS) return 'from-purple-900/30 via-indigo-900/20 to-black'; 
@@ -294,7 +321,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   return (
     <div className="absolute inset-0 bg-black overflow-hidden select-none">
       
-      {/* ADDED: Custom Keyframe for the floating animation if not present in global css */}
       <style>{`
         @keyframes aestheticFloat {
           0% { transform: translateY(0) scale(0.8); opacity: 0; }
@@ -334,7 +360,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           <div className={`absolute inset-0 bg-black/40 transition-opacity duration-1000 pointer-events-none ${phase === SessionPhase.FOCUS ? 'opacity-60 backdrop-grayscale-[30%]' : 'opacity-0'}`}></div>
       </div>
 
-      {/* --- LAYER 3: FLOATING REACTIONS (UPDATED) --- */}
+      {/* --- LAYER 3: FLOATING REACTIONS --- */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden z-20">
           {floatingEmojis.map(e => (
               <div 
@@ -342,7 +368,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                 className="absolute bottom-28 text-5xl pointer-events-none select-none drop-shadow-[0_4px_8px_rgba(0,0,0,0.5)]"
                 style={{ 
                     left: `${e.left}%`,
-                    // We combine the CSS animation with the dynamic rotation logic
                     animation: 'aestheticFloat 2.5s ease-out forwards',
                     transform: `rotate(${e.rotation}deg)` 
                 }}
@@ -390,9 +415,13 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             </button>
         </div>
 
-        {/* Exit Button */}
+        {/* Exit Button (UPDATED CLICK HANDLER) */}
         <div className="absolute top-6 right-6 pointer-events-auto">
-            <Button variant="danger" onClick={() => confirm("Exit session?") && finishSession(true)} className="py-2 px-3 text-xs bg-red-500/20 hover:bg-red-500/30 border-red-500/50 backdrop-blur-md">
+            <Button 
+                variant="danger" 
+                onClick={handleExitClick} 
+                className="py-2 px-3 text-xs bg-red-500/20 hover:bg-red-500/30 border-red-500/50 backdrop-blur-md"
+            >
                 <LogOut size={14} className="mr-2"/> Exit
             </Button>
         </div>
@@ -403,7 +432,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
              <TaskBoard isOpen={isTaskBoardOpen} onClose={() => setIsTaskBoardOpen(false)} myTasks={myTasks} partnerTasks={partnerTasks} onAddTask={handleAddTask} onToggleTask={handleToggleTask} onDeleteTask={handleDeleteTask} isRevealed={phase !== SessionPhase.FOCUS} canEdit={phase === SessionPhase.ICEBREAKER} partnerName={partner.name} />
         </div>
 
-        {/* Bottom Control Bar (UPDATED BUTTONS) */}
+        {/* Bottom Control Bar */}
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-4 pointer-events-auto">
              <div className="bg-slate-900/80 backdrop-blur-xl border border-white/10 rounded-full px-4 py-2 flex items-center gap-3 mr-4 shadow-2xl">
                  <button 

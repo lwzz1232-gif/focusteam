@@ -2,28 +2,34 @@ import { useEffect, useRef, useState } from 'react';
 import { db } from '../utils/firebaseConfig';
 import { collection, doc, onSnapshot, updateDoc, addDoc } from 'firebase/firestore';
 
-// FIX 1: Use ALL Google STUN servers (Redundancy)
+// --- UPDATED CONFIGURATION WITH METERED.CA ---
 const SERVERS = {
   iceServers: [
-    {
-      // Google STUN (no username/credential)
+    // 1. Google STUN (Backup)
+    { 
       urls: [
         'stun:stun1.l.google.com:19302',
         'stun:stun2.l.google.com:19302',
-        'stun:stun3.l.google.com:19302',
-        'stun:stun4.l.google.com:19302',
-      ]
+      ] 
+    },
+    // 2. METERED.CA TURN SERVERS (The 4G/5G Fix)
+    {
+      urls: "stun:stun.relay.metered.ca:80",
     },
     {
-      // OpenRelay (TURN + STUN) — requires username + credential
-      urls: [
-        'stun:openrelay.metered.ca:80',
-        'turn:openrelay.metered.ca:80',
-        'turn:openrelay.metered.ca:443',
-        'turn:openrelay.metered.ca:3478'
-      ],
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
+      urls: "turn:global.relay.metered.ca:80",
+      username: "13dcd8d78e5f8c8601908847",
+      credential: "H5VMgS+huy6pYXCI",
+    },
+    {
+      urls: "turn:global.relay.metered.ca:80?transport=tcp",
+      username: "13dcd8d78e5f8c8601908847",
+      credential: "H5VMgS+huy6pYXCI",
+    },
+    {
+      urls: "turn:global.relay.metered.ca:443",
+      username: "13dcd8d78e5f8c8601908847",
+      credential: "H5VMgS+huy6pYXCI",
     }
   ],
   iceCandidatePoolSize: 10,
@@ -37,7 +43,7 @@ export const useWebRTC = (sessionId: string, userId: string, isInitiator: boolea
   const pc = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   
-  // FIX 2: The Buffer Queue (This prevents the "Remote Description" error)
+  // BUFFER QUEUE (Prevents "Remote Description" errors)
   const candidateQueue = useRef<RTCIceCandidateInit[]>([]);
 
   useEffect(() => {
@@ -49,7 +55,7 @@ export const useWebRTC = (sessionId: string, userId: string, isInitiator: boolea
     const setupConnection = async () => {
       console.log(`[WEBRTC] Initializing. Role: ${isInitiator ? 'Caller' : 'Callee'}`);
 
-      // 1. Initialize PeerConnection
+      // 1. Initialize PeerConnection with TURN servers
       pc.current = new RTCPeerConnection(SERVERS);
 
       pc.current.oniceconnectionstatechange = () => {
@@ -93,14 +99,13 @@ export const useWebRTC = (sessionId: string, userId: string, isInitiator: boolea
         return; 
       }
 
-      // 4. Handle Local Candidates (Sending to YOUR specific collections)
+      // 4. Handle Local Candidates
       const sessionRef = doc(db, 'sessions', sessionId);
       const callerCandidatesCol = collection(sessionRef, 'callerCandidates');
       const calleeCandidatesCol = collection(sessionRef, 'calleeCandidates');
 
       pc.current.onicecandidate = (event) => {
         if (event.candidate) {
-          // Keep your exact logic here
           const targetCol = isInitiator ? callerCandidatesCol : calleeCandidatesCol;
           addDoc(targetCol, event.candidate.toJSON()).catch(e => console.error("Candidate Error", e));
         }
@@ -120,11 +125,10 @@ export const useWebRTC = (sessionId: string, userId: string, isInitiator: boolea
           candidateQueue.current = [];
       };
 
-      // Helper to handle incoming candidates (With Buffering)
+      // Helper to handle incoming candidates
       const handleIncomingCandidate = (change: any) => {
           if (change.type === 'added' && pc.current) {
               const candidateData = change.doc.data();
-              // If we are ready, add it. If not, queue it.
               if (pc.current.remoteDescription && pc.current.remoteDescription.type) {
                   const candidate = new RTCIceCandidate(candidateData);
                   pc.current.addIceCandidate(candidate).catch(e => console.warn("ICE Add Fail", e));
@@ -138,7 +142,6 @@ export const useWebRTC = (sessionId: string, userId: string, isInitiator: boolea
       if (isInitiator) {
         // --- CALLER ---
         console.log('[WEBRTC] Creating Offer...');
-        // FIX 3: Ice Restart enabled here
         const offer = await pc.current.createOffer({ iceRestart: true });
         await pc.current.setLocalDescription(offer);
         
@@ -146,20 +149,17 @@ export const useWebRTC = (sessionId: string, userId: string, isInitiator: boolea
             offer: { type: offer.type, sdp: offer.sdp } 
         });
 
-        // Listen for Answer
         const unsubSession = onSnapshot(sessionRef, async (snapshot) => {
           const data = snapshot.data();
           if (!pc.current?.currentRemoteDescription && data?.answer) {
             console.log('[WEBRTC] Received Answer');
             const answer = new RTCSessionDescription(data.answer);
             await pc.current.setRemoteDescription(answer);
-            // Process any candidates that arrived early
             processCandidateQueue();
           }
         });
         unsubscribes.push(unsubSession);
 
-        // Listen for Callee Candidates
         const unsubCandidates = onSnapshot(calleeCandidatesCol, (snapshot) => {
           snapshot.docChanges().forEach(handleIncomingCandidate);
         });
@@ -169,7 +169,6 @@ export const useWebRTC = (sessionId: string, userId: string, isInitiator: boolea
         // --- CALLEE ---
         console.log('[WEBRTC] Waiting for Offer...');
         
-        // Listen for Offer
         const unsubSession = onSnapshot(sessionRef, async (snapshot) => {
           const data = snapshot.data();
           if (!pc.current?.currentRemoteDescription && data?.offer) {
@@ -177,7 +176,6 @@ export const useWebRTC = (sessionId: string, userId: string, isInitiator: boolea
             const offer = new RTCSessionDescription(data.offer);
             await pc.current.setRemoteDescription(offer);
             
-            // Process any candidates that arrived early
             processCandidateQueue();
 
             const answer = await pc.current.createAnswer();
@@ -190,7 +188,6 @@ export const useWebRTC = (sessionId: string, userId: string, isInitiator: boolea
         });
         unsubscribes.push(unsubSession);
 
-        // Listen for Caller Candidates
         const unsubCandidates = onSnapshot(callerCandidatesCol, (snapshot) => {
           snapshot.docChanges().forEach(handleIncomingCandidate);
         });

@@ -4,7 +4,7 @@ import { User } from '../types';
 import { auth, db, googleProvider } from '../utils/firebaseConfig';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, signInWithPopup, sendEmailVerification } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
-import { Lock, Mail, User as UserIcon, AlertCircle, CheckSquare, CheckCircle2, Chrome } from 'lucide-react';
+import { Lock, Mail, User as UserIcon, AlertCircle, CheckCircle2, Chrome, FileText, X, ShieldCheck } from 'lucide-react';
 import { AuthMascot } from '../components/AuthMascot';
 import { Logo } from '../components/Logo';
 
@@ -19,6 +19,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false); // New state for modal
   const [isPasswordFocus, setIsPasswordFocus] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -60,7 +61,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
             if (isSignup) {
                 if (password.length < 6) throw new Error("Password must be 6+ chars.");
                 if (password !== confirmPassword) throw new Error("Passwords do not match.");
-                if (!agreedToTerms) throw new Error("Please agree to terms.");
+                if (!agreedToTerms) throw new Error("Please read and agree to the Terms of Service.");
 
                 const cred = await createUserWithEmailAndPassword(auth, email, password);
                 user = cred.user;
@@ -70,15 +71,11 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
             } else {
                 const cred = await signInWithEmailAndPassword(auth, email, password);
                 user = cred.user;
-                
-                // Note: Auth Hook also handles this, but good for immediate feedback
-                // We let the auth hook handle strict enforcement to avoid double logic, 
-                // but we can warn here if needed.
             }
         }
 
         if (user) {
-            // Check Ban Status immediately (Redundant check for better UX speed)
+            // Check Ban Status
             const userDoc = await getDoc(doc(db, "users", user.uid));
             if (userDoc.exists()) {
                 const data = userDoc.data();
@@ -97,8 +94,9 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 });
             }
 
-            // If it's a new signup with password, show verification screen instead of logging in
+            // ENHANCED FLOW: If Signup, force logout and show success screen
             if (isSignup && !isGoogle) {
+                await auth.signOut(); // Force logout so they have to login manually
                 setSignupSuccess(true);
             } else {
                  // Login success handled by global auth listener
@@ -107,7 +105,6 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
     } catch (err: any) {
         console.error(err);
-        // Use custom message if thrown, otherwise map firebase code
         if (err.message && !err.code) {
             setError(err.message);
         } else {
@@ -117,17 +114,162 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setIsLoading(false);
   };
 
+  // --- TERMS MODAL COMPONENT ---
+  const TermsModal = () => (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+        <div className="bg-slate-900 border border-slate-700 w-full max-w-2xl max-h-[85vh] rounded-2xl shadow-2xl flex flex-col">
+            <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-950/50 rounded-t-2xl">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <ShieldCheck className="text-blue-500" size={20}/> Terms of Service
+                </h3>
+                <button onClick={() => setShowTermsModal(false)} className="text-slate-500 hover:text-white transition-colors">
+                    <X size={20} />
+                </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto text-sm text-slate-300 space-y-6 leading-relaxed custom-scrollbar">
+                <section>
+                    <h4 className="text-white font-bold mb-2">1. Eligibility</h4>
+                    <ul className="list-disc pl-5 space-y-1 text-slate-400">
+                        <li>You must be at least 16 years old to use this platform.</li>
+                        <li>If you are under 18, you must have permission from a parent or legal guardian.</li>
+                        <li>You must provide accurate information when creating an account.</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h4 className="text-white font-bold mb-2">2. Purpose of the Platform</h4>
+                    <p className="mb-2">The Platform is created solely for:</p>
+                    <ul className="list-disc pl-5 space-y-1 text-slate-400">
+                        <li>Finding study partners.</li>
+                        <li>Connecting through peer-to-peer video/audio chat.</li>
+                        <li>Studying together.</li>
+                    </ul>
+                    <p className="mt-2 text-amber-400/80 italic">It is NOT a dating service, social network, or platform for personal interactions outside studying.</p>
+                </section>
+
+                <section>
+                    <h4 className="text-white font-bold mb-2">3. User Responsibilities</h4>
+                    <p>By using the Platform, you agree to:</p>
+                    <ul className="list-disc pl-5 space-y-1 text-slate-400 mt-2">
+                        <li>Use the service respectfully and professionally.</li>
+                        <li>Keep your account secure and not share your login credentials.</li>
+                        <li>Immediately report any unsafe or inappropriate behavior.</li>
+                        <li>Follow all applicable laws (your local laws + online safety regulations).</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h4 className="text-white font-bold mb-2">4. Prohibited Behavior</h4>
+                    <p className="text-red-400 font-medium mb-2">You are strictly forbidden from:</p>
+                    <ul className="list-disc pl-5 space-y-1 text-slate-400">
+                        <li>Harassment, bullying, threats, or abusive language.</li>
+                        <li>Sexual or inappropriate behavior of any kind (this includes sexual jokes, flirting, or requests).</li>
+                        <li>Sharing or requesting personal data (phone number, address, school, social media, etc.).</li>
+                        <li>Recording or taking screenshots of video/audio sessions.</li>
+                        <li>Impersonating anyone or providing false identity info.</li>
+                        <li>Any illegal activity.</li>
+                    </ul>
+                    <p className="mt-2 font-bold text-red-500">If you violate these rules, your account may be suspended or permanently banned.</p>
+                </section>
+
+                <section>
+                    <h4 className="text-white font-bold mb-2">5. Safety</h4>
+                    <ul className="list-disc pl-5 space-y-1 text-slate-400">
+                        <li>All video sessions are peer-to-peer; the Platform does not store video or audio.</li>
+                        <li>We recommend not sharing personal information during sessions.</li>
+                        <li>Users should end a session and report the partner if they feel uncomfortable.</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h4 className="text-white font-bold mb-2">6. Platform Limitations</h4>
+                    <ul className="list-disc pl-5 space-y-1 text-slate-400">
+                        <li>The Platform does not guarantee successful matches or study results.</li>
+                        <li>Sessions may disconnect due to network issues.</li>
+                        <li>The Platform is provided “as is” without warranties.</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h4 className="text-white font-bold mb-2">7. Privacy</h4>
+                    <ul className="list-disc pl-5 space-y-1 text-slate-400">
+                        <li>We store only minimal data needed for login and matching.</li>
+                        <li>We do not store or record video/audio from P2P sessions.</li>
+                        <li>By using the Platform, you consent to the collection and processing of basic account data.</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h4 className="text-white font-bold mb-2">8. Termination</h4>
+                    <p>We reserve the right to suspend, limit, or permanently remove any account that violates these Terms or threatens user safety.</p>
+                </section>
+
+                <section>
+                    <h4 className="text-white font-bold mb-2">9. Changes to Terms</h4>
+                    <p>We may update these Terms from time to time. Continued use of the Platform means you accept the updated Terms.</p>
+                </section>
+
+                <section>
+                    <h4 className="text-white font-bold mb-2">10. Disclaimer</h4>
+                    <p className="mb-2">The Platform provides a tool for users to connect for studying. We are not responsible for:</p>
+                    <ul className="list-disc pl-5 space-y-1 text-slate-400">
+                        <li>The actions of individual users.</li>
+                        <li>What users say or do during sessions.</li>
+                        <li>Network failures or technical issues.</li>
+                    </ul>
+                    <p className="mt-2 font-bold">Use the Platform at your own risk.</p>
+                </section>
+            </div>
+
+            <div className="p-5 border-t border-slate-800 bg-slate-950/50 rounded-b-2xl flex justify-end">
+                <Button onClick={() => { setAgreedToTerms(true); setShowTermsModal(false); }}>
+                    I Agree & Close
+                </Button>
+            </div>
+        </div>
+    </div>
+  );
+
+  // --- SIGNUP SUCCESS SCREEN ---
   if (signupSuccess) {
       return (
-        <div className="flex-1 flex items-center justify-center p-4">
-             <div className="max-w-md w-full bg-slate-900 border border-slate-800 p-8 rounded-2xl text-center">
-                 <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                     <Mail size={32} className="text-emerald-500" />
+        <div className="flex-1 flex items-center justify-center p-4 animate-in fade-in slide-in-from-bottom-4">
+             <div className="max-w-md w-full bg-slate-900 border border-slate-800 p-8 rounded-2xl text-center shadow-2xl relative overflow-hidden">
+                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-blue-500"></div>
+                 
+                 <div className="w-20 h-20 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-6 ring-1 ring-emerald-500/30">
+                     <CheckCircle2 size={40} className="text-emerald-500" />
                  </div>
-                 <h2 className="text-2xl font-bold text-white mb-2">Verify Your Email</h2>
-                 <p className="text-slate-400 mb-6">We sent a verification link to <b>{email}</b>.<br/>Please check your inbox to continue.</p>
-                 <Button onClick={() => { setSignupSuccess(false); setIsSignup(false); }} variant="secondary">
-                     Back to Login
+                 
+                 <h2 className="text-2xl font-bold text-white mb-2">Account Created!</h2>
+                 <p className="text-slate-400 mb-8 text-sm">
+                     Welcome to the community. To ensure platform safety, we require one final step.
+                 </p>
+
+                 <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 text-left space-y-3 mb-8">
+                    <div className="flex items-start gap-3">
+                        <div className="bg-emerald-500/20 p-1.5 rounded text-emerald-400 mt-0.5"><Mail size={14} /></div>
+                        <div>
+                            <span className="text-slate-200 font-medium text-sm block">Step 1: Verify Email</span>
+                            <span className="text-slate-500 text-xs">We sent a link to <span className="text-slate-300">{email}</span></span>
+                        </div>
+                    </div>
+                    <div className="w-px h-4 bg-slate-800 ml-4"></div>
+                    <div className="flex items-start gap-3">
+                        <div className="bg-blue-500/20 p-1.5 rounded text-blue-400 mt-0.5"><Lock size={14} /></div>
+                        <div>
+                            <span className="text-slate-200 font-medium text-sm block">Step 2: Login</span>
+                            <span className="text-slate-500 text-xs">Sign in with your new credentials.</span>
+                        </div>
+                    </div>
+                 </div>
+
+                 <Button 
+                    onClick={() => { setSignupSuccess(false); setIsSignup(false); }} 
+                    className="w-full py-3 shadow-lg shadow-emerald-900/20"
+                 >
+                     Proceed to Login
                  </Button>
              </div>
         </div>
@@ -136,6 +278,9 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
   return (
     <div className="flex-1 flex items-center justify-center p-4">
+      {/* RENDER TERMS MODAL IF OPEN */}
+      {showTermsModal && <TermsModal />}
+
       <div className="max-w-md w-full bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl relative overflow-hidden transition-all duration-300">
         <div className="relative z-10 mb-2">
             <AuthMascot isHidden={isPasswordFocus} />
@@ -176,9 +321,17 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                     <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
                     <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} onFocus={() => setIsPasswordFocus(true)} onBlur={() => setIsPasswordFocus(false)} className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2.5 pl-10 pr-4 text-white text-sm" placeholder="••••••••" required />
                     </div>
-                    <div className="flex items-center gap-2 pt-2">
-                        <input type="checkbox" checked={agreedToTerms} onChange={(e) => setAgreedToTerms(e.target.checked)} className="rounded bg-slate-800 border-slate-600"/>
-                        <span className="text-xs text-slate-400">Agree to terms</span>
+                    {/* MODIFIED CHECKBOX AREA */}
+                    <div className="flex items-center gap-2 pt-3">
+                        <input 
+                            type="checkbox" 
+                            checked={agreedToTerms} 
+                            onChange={(e) => setAgreedToTerms(e.target.checked)} 
+                            className="w-4 h-4 rounded bg-slate-800 border-slate-600 focus:ring-blue-500 cursor-pointer"
+                        />
+                        <span className="text-xs text-slate-400">
+                            I agree to the <button type="button" onClick={() => setShowTermsModal(true)} className="text-blue-400 hover:text-blue-300 font-medium hover:underline transition-all">Terms of Service</button>
+                        </span>
                     </div>
                 </div>
             )}

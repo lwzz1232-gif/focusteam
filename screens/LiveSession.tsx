@@ -50,8 +50,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [reportReason, setReportReason] = useState('Inappropriate Behavior');
   const [reportDetails, setReportDetails] = useState('');
 
-  // Draggable Self-Video State
-  const [selfPos, setSelfPos] = useState({ x: 20, y: 20 });
+  // Draggable Self-Video State - Default lower for mobile
+  const [selfPos, setSelfPos] = useState({ x: 20, y: 100 }); 
   const [isDragging, setIsDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
 
@@ -125,8 +125,10 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           }
       };
       window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('touchstart', handleMouseMove); // Mobile support
       return () => {
           window.removeEventListener('mousemove', handleMouseMove);
+          window.removeEventListener('touchstart', handleMouseMove);
           if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
       };
   }, [phase]);
@@ -228,25 +230,37 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     return () => unsub();
   }, [sessionId, user.id]);
 
-  // --- DRAG ---
-  const handleMouseDown = (e: React.MouseEvent) => {
+  // --- DRAG (Touch & Mouse Support) ---
+  const handleStartDrag = (clientX: number, clientY: number) => {
       setIsDragging(true);
-      dragStart.current = { x: e.clientX - selfPos.x, y: e.clientY - selfPos.y };
+      dragStart.current = { x: clientX - selfPos.x, y: clientY - selfPos.y };
   };
+
+  const handleMouseDown = (e: React.MouseEvent) => handleStartDrag(e.clientX, e.clientY);
+  const handleTouchStart = (e: React.TouchEvent) => handleStartDrag(e.touches[0].clientX, e.touches[0].clientY);
   
   useEffect(() => {
-      const handleMouseMove = (e: MouseEvent) => {
+      const handleMove = (clientX: number, clientY: number) => {
           if (!isDragging) return;
-          setSelfPos({ x: e.clientX - dragStart.current.x, y: e.clientY - dragStart.current.y });
+          setSelfPos({ x: clientX - dragStart.current.x, y: clientY - dragStart.current.y });
       };
+      
       const handleMouseUp = () => setIsDragging(false);
+      
+      const onMouseMove = (e: MouseEvent) => handleMove(e.clientX, e.clientY);
+      const onTouchMove = (e: TouchEvent) => handleMove(e.touches[0].clientX, e.touches[0].clientY);
+
       if (isDragging) {
-          window.addEventListener('mousemove', handleMouseMove);
+          window.addEventListener('mousemove', onMouseMove);
           window.addEventListener('mouseup', handleMouseUp);
+          window.addEventListener('touchmove', onTouchMove);
+          window.addEventListener('touchend', handleMouseUp);
       }
       return () => {
-          window.removeEventListener('mousemove', handleMouseMove);
+          window.removeEventListener('mousemove', onMouseMove);
           window.removeEventListener('mouseup', handleMouseUp);
+          window.removeEventListener('touchmove', onTouchMove);
+          window.removeEventListener('touchend', handleMouseUp);
       };
   }, [isDragging]);
 
@@ -274,21 +288,16 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     else setPhase(SessionPhase.COMPLETED);
   };
 
-  // --- UPDATED: HANDLE EXIT WITH 2-STEP MODAL (NO IMMUNITY FOR TESTING) ---
+  // --- HANDLE EXIT ---
   const handleExitClick = () => {
-    // Check Phase
     if (phase === SessionPhase.FOCUS) {
-        setExitModalStep(1); // Trigger Stage 1 Modal
+        setExitModalStep(1); 
     } else {
-        // Simple confirm for non-focus phases
-        if (confirm("Exit session?")) {
-            finishSession(true);
-        }
+        if (confirm("Exit session?")) finishSession(true);
     }
   };
 
   const confirmExitWithStrike = async () => {
-      // Add strike logic
       try {
           await updateDoc(doc(db, 'users', user.id), {
               strikes: increment(1),
@@ -350,7 +359,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           {floatingEmojis.map(e => (
               <div 
                 key={e.id} 
-                className="absolute bottom-28 text-5xl pointer-events-none select-none drop-shadow-[0_4px_8px_rgba(0,0,0,0.5)]"
+                className="absolute bottom-28 md:bottom-32 text-5xl pointer-events-none select-none drop-shadow-[0_4px_8px_rgba(0,0,0,0.5)]"
                 style={{ 
                     left: `${e.left}%`,
                     animation: 'aestheticFloat 2.5s ease-out forwards',
@@ -364,8 +373,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
       <div 
         onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
         style={{ transform: `translate(${selfPos.x}px, ${selfPos.y}px)` }}
-        className={`absolute top-0 left-0 w-32 md:w-48 aspect-[3/4] bg-slate-900 rounded-2xl overflow-hidden shadow-2xl border border-white/10 z-30 cursor-grab active:cursor-grabbing transition-opacity duration-500 ${showUI ? 'opacity-100' : 'opacity-30 hover:opacity-100'}`}
+        className={`absolute top-0 left-0 w-28 md:w-48 aspect-[3/4] bg-slate-900 rounded-2xl overflow-hidden shadow-2xl border border-white/10 z-30 cursor-grab active:cursor-grabbing transition-opacity duration-500 ${showUI ? 'opacity-100' : 'opacity-30 hover:opacity-100'}`}
       >
           <video ref={myVideoRef} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]" />
           <div className="absolute bottom-2 left-2 right-2 flex justify-between items-center">
@@ -376,34 +386,34 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
       <div className={`absolute inset-0 pointer-events-none z-40 transition-opacity duration-500 ${showUI ? 'opacity-100' : 'opacity-0'}`}>
         
-        <div className="absolute top-6 left-0 right-0 flex justify-center pointer-events-none">
-            <div className={`backdrop-blur-md border rounded-full px-6 py-2 flex items-center gap-4 shadow-xl transition-all duration-500 ${phase === SessionPhase.FOCUS ? 'bg-black/60 border-red-500/30' : 'bg-slate-900/80 border-slate-700'}`}>
-                <span className={`text-xs font-bold uppercase tracking-wider ${phase === SessionPhase.FOCUS ? 'text-red-400' : 'text-slate-400'}`}>{phase}</span>
-                <div className="w-px h-4 bg-white/10"></div>
-                <span className="font-mono text-xl text-white font-variant-numeric tabular-nums">
+        {/* Top Bar - Adjusted margins for mobile */}
+        <div className="absolute top-4 md:top-6 left-0 right-0 flex justify-center pointer-events-none px-14 md:px-0">
+            <div className={`backdrop-blur-md border rounded-full px-4 md:px-6 py-2 flex items-center gap-2 md:gap-4 shadow-xl transition-all duration-500 ${phase === SessionPhase.FOCUS ? 'bg-black/60 border-red-500/30' : 'bg-slate-900/80 border-slate-700'}`}>
+                <span className={`text-[10px] md:text-xs font-bold uppercase tracking-wider ${phase === SessionPhase.FOCUS ? 'text-red-400' : 'text-slate-400'}`}>{phase}</span>
+                <div className="w-px h-3 md:h-4 bg-white/10"></div>
+                <span className="font-mono text-lg md:text-xl text-white font-variant-numeric tabular-nums">
                     {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
                 </span>
             </div>
         </div>
 
-        <div className="absolute top-6 left-6 pointer-events-auto">
+        <div className="absolute top-4 md:top-6 left-4 md:left-6 pointer-events-auto">
             <button 
                 onClick={() => setIsReportOpen(true)} 
-                className="p-3 rounded-full bg-slate-900/40 text-slate-400 hover:text-red-400 hover:bg-slate-900 border border-slate-700/50 backdrop-blur-md transition-all hover:scale-105"
+                className="p-2.5 md:p-3 rounded-full bg-slate-900/40 text-slate-400 hover:text-red-400 hover:bg-slate-900 border border-slate-700/50 backdrop-blur-md transition-all hover:scale-105"
                 title="Report User"
             >
                 <Flag size={16} />
             </button>
         </div>
 
-        {/* EXIT BUTTON WITH HANDLER */}
-        <div className="absolute top-6 right-6 pointer-events-auto">
+        <div className="absolute top-4 md:top-6 right-4 md:right-6 pointer-events-auto">
             <Button 
                 variant="danger" 
                 onClick={handleExitClick} 
                 className="py-2 px-3 text-xs bg-red-500/20 hover:bg-red-500/30 border-red-500/50 backdrop-blur-md"
             >
-                <LogOut size={14} className="mr-2"/> Exit
+                <LogOut size={14} className="mr-2"/> <span className="hidden md:inline">Exit</span>
             </Button>
         </div>
 
@@ -412,57 +422,53 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
              <TaskBoard isOpen={isTaskBoardOpen} onClose={() => setIsTaskBoardOpen(false)} myTasks={myTasks} partnerTasks={partnerTasks} onAddTask={handleAddTask} onToggleTask={handleToggleTask} onDeleteTask={handleDeleteTask} isRevealed={phase !== SessionPhase.FOCUS} canEdit={phase === SessionPhase.ICEBREAKER} partnerName={partner.name} />
         </div>
 
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-4 pointer-events-auto">
-             <div className="bg-slate-900/80 backdrop-blur-xl border border-white/10 rounded-full px-4 py-2 flex items-center gap-3 mr-4 shadow-2xl">
-                 <button 
-                    onClick={() => handleReaction('🔥')} 
-                    className="hover:bg-orange-500/20 hover:scale-110 active:scale-95 transition-all p-2 rounded-full text-2xl"
-                 >🔥</button>
-                 <button 
-                    onClick={() => handleReaction('💯')} 
-                    className="hover:bg-red-500/20 hover:scale-110 active:scale-95 transition-all p-2 rounded-full text-2xl"
-                 >💯</button>
-                 <button 
-                    onClick={() => handleReaction('👋')} 
-                    className="hover:bg-blue-500/20 hover:scale-110 active:scale-95 transition-all p-2 rounded-full text-2xl"
-                 >👋</button>
+        {/* Bottom Control Bar - Responsive Layout */}
+        <div className="absolute bottom-6 md:bottom-8 left-0 right-0 px-4 flex flex-col md:flex-row items-center justify-center gap-3 md:gap-4 pointer-events-auto">
+             
+             {/* Reactions Bar - Stacked on top for mobile */}
+             <div className="bg-slate-900/80 backdrop-blur-xl border border-white/10 rounded-full px-4 py-1.5 md:py-2 flex items-center gap-3 shadow-2xl order-1 md:order-none mb-1 md:mb-0">
+                 <button onClick={() => handleReaction('🔥')} className="hover:bg-orange-500/20 hover:scale-110 active:scale-95 transition-all p-1.5 md:p-2 rounded-full text-xl md:text-2xl">🔥</button>
+                 <button onClick={() => handleReaction('💯')} className="hover:bg-red-500/20 hover:scale-110 active:scale-95 transition-all p-1.5 md:p-2 rounded-full text-xl md:text-2xl">💯</button>
+                 <button onClick={() => handleReaction('👋')} className="hover:bg-blue-500/20 hover:scale-110 active:scale-95 transition-all p-1.5 md:p-2 rounded-full text-xl md:text-2xl">👋</button>
              </div>
 
-             <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700 rounded-full p-2 flex items-center gap-2 shadow-2xl">
+             {/* Main Controls */}
+             <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700 rounded-full p-2 flex items-center gap-2 shadow-2xl order-2 md:order-none">
                 {phase === SessionPhase.ICEBREAKER && (
                     <Button onClick={async () => { setIsLoadingIcebreaker(true); setIcebreaker(await generateIcebreaker(partner.type)); setIsLoadingIcebreaker(false); }} variant="ghost" className="rounded-full w-10 h-10 p-0 text-yellow-400 hover:bg-yellow-400/10" title="Icebreaker">
                         <Sparkles size={20} className={isLoadingIcebreaker ? 'animate-spin' : ''}/>
                     </Button>
                 )}
 
-                <button onClick={() => { if(phase !== SessionPhase.FOCUS) { setMicEnabled(!micEnabled); setManualMicToggle(!micEnabled); }}} disabled={phase === SessionPhase.FOCUS} className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${phase === SessionPhase.FOCUS ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : micEnabled ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-red-500/20 text-red-500 hover:bg-red-500/30'}`}>
-                    {micEnabled && phase !== SessionPhase.FOCUS ? <Mic size={20} /> : <MicOff size={20} />}
+                <button onClick={() => { if(phase !== SessionPhase.FOCUS) { setMicEnabled(!micEnabled); setManualMicToggle(!micEnabled); }}} disabled={phase === SessionPhase.FOCUS} className={`w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center transition-all ${phase === SessionPhase.FOCUS ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : micEnabled ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-red-500/20 text-red-500 hover:bg-red-500/30'}`}>
+                    {micEnabled && phase !== SessionPhase.FOCUS ? <Mic size={18} /> : <MicOff size={18} />}
                 </button>
 
-                <button onClick={() => setCamEnabled(!camEnabled)} className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${camEnabled ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-red-500/20 text-red-500 hover:bg-red-500/30'}`}>
-                    {camEnabled ? <Video size={20} /> : <VideoOff size={20} />}
+                <button onClick={() => setCamEnabled(!camEnabled)} className={`w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center transition-all ${camEnabled ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-red-500/20 text-red-500 hover:bg-red-500/30'}`}>
+                    {camEnabled ? <Video size={18} /> : <VideoOff size={18} />}
                 </button>
 
-                <div className="w-px h-8 bg-slate-700 mx-1"></div>
+                <div className="w-px h-6 md:h-8 bg-slate-700 mx-1"></div>
 
-                <button onClick={() => { setIsChatOpen(!isChatOpen); setUnreadChatCount(0); }} className="w-12 h-12 rounded-full flex items-center justify-center bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 relative">
-                    <MessageSquare size={20} />
+                <button onClick={() => { setIsChatOpen(!isChatOpen); setUnreadChatCount(0); }} className="w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 relative">
+                    <MessageSquare size={18} />
                     {unreadChatCount > 0 && <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-slate-900"></span>}
                 </button>
 
-                <button onClick={() => setIsTaskBoardOpen(!isTaskBoardOpen)} className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${isTaskBoardOpen ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}>
-                    <ListChecks size={20} />
+                <button onClick={() => setIsTaskBoardOpen(!isTaskBoardOpen)} className={`w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center transition-colors ${isTaskBoardOpen ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}>
+                    <ListChecks size={18} />
                 </button>
              </div>
         </div>
 
         {icebreaker && (
-            <div className="absolute bottom-32 left-1/2 -translate-x-1/2 bg-slate-900/95 border border-yellow-500/30 text-yellow-100 px-6 py-4 rounded-2xl shadow-2xl max-w-md text-center pointer-events-auto animate-in slide-in-from-bottom-4">
+            <div className="absolute bottom-32 left-1/2 -translate-x-1/2 bg-slate-900/95 border border-yellow-500/30 text-yellow-100 px-6 py-4 rounded-2xl shadow-2xl max-w-md text-center pointer-events-auto animate-in slide-in-from-bottom-4 w-[90%] md:w-auto">
                 <p className="text-sm font-medium">✨ {icebreaker}</p>
                 <button onClick={() => setIcebreaker(null)} className="absolute -top-2 -right-2 bg-slate-800 rounded-full p-1 border border-slate-700 hover:bg-slate-700"><LogOut size={12}/></button>
             </div>
         )}
 
+        {/* MODALS SECTION (UNCHANGED) */}
         {isReportOpen && (
             <div className="absolute inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
                 <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4 pointer-events-auto">
@@ -506,12 +512,10 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             </div>
         )}
 
-        {/* --- EXIT MODAL (2-STAGE) --- */}
+        {/* 2-STAGE EXIT MODAL */}
         {exitModalStep > 0 && (
             <div className="absolute inset-0 z-[70] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in zoom-in-95 duration-200 pointer-events-auto">
                 <div className="max-w-md w-full bg-slate-900 border border-white/10 rounded-2xl p-6 shadow-2xl relative overflow-hidden">
-                    
-                    {/* STAGE 1: EMPATHY */}
                     {exitModalStep === 1 && (
                         <div className="space-y-4 text-center">
                             <div className="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center mx-auto mb-2">
@@ -533,7 +537,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                         </div>
                     )}
 
-                    {/* STAGE 2: CONSEQUENCE */}
                     {exitModalStep === 2 && (
                         <div className="space-y-4 text-center animate-in slide-in-from-right-8">
                             <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-2 border border-red-500/20">

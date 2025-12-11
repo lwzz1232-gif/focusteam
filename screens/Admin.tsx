@@ -12,7 +12,7 @@ interface AdminProps {
 export const Admin: React.FC<AdminProps> = ({ onBack }) => {
     // Data State
     const [reports, setReports] = useState<any[]>([]); 
-    const [sessions, setSessions] = useState<SessionLog[]>([]);
+    const [sessions, setSessions] = useState<any[]>([]); // Changed to any to allow custom name fields
     const [users, setUsers] = useState<User[]>([]);
     const [stats, setStats] = useState({ activeUsers: 0, activeSessions: 0, totalHoursFocused: 0 });
 
@@ -63,7 +63,47 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                 const q = query(collection(db, 'sessions'), orderBy('createdAt', 'desc'), limit(20));
                 const snap = await getDocs(q);
                 setLastSessionDoc(snap.docs[snap.docs.length - 1]);
-                setSessions(mapSessions(snap));
+                
+                // NEW: Fetch User Names for Sessions so we don't just see IDs
+                const mappedSessions = await Promise.all(snap.docs.map(async (d) => {
+                    const data = d.data();
+                    let u1Name = data.user1 || 'Unknown';
+                    let u2Name = data.user2 || 'Unknown';
+
+                    // Try to fetch real names
+                    try {
+                        if (data.user1) {
+                            const u1Doc = await getDoc(doc(db, 'users', data.user1));
+                            if (u1Doc.exists()) u1Name = u1Doc.data().name;
+                        }
+                        if (data.user2) {
+                            const u2Doc = await getDoc(doc(db, 'users', data.user2));
+                            if (u2Doc.exists()) u2Name = u2Doc.data().name;
+                        }
+                    } catch (e) { console.error("Error fetching session names", e); }
+
+                    // Fix for Duration/Status (Logic fix for 0m bug)
+                    let finalDuration = 0;
+                    if (data.endedAt && data.createdAt) {
+                        finalDuration = Math.round((data.endedAt.toMillis() - data.createdAt.toMillis()) / 60000);
+                    } else if (data.status === 'completed') {
+                        // If status is completed but no end time, assume full duration
+                        finalDuration = data.config?.duration || 0;
+                    }
+
+                    return {
+                        id: d.id,
+                        user1: u1Name, // Showing Name instead of ID
+                        user2: u2Name, // Showing Name instead of ID
+                        startTime: data.createdAt?.toMillis() || Date.now(),
+                        duration: data.config?.duration || 0,
+                        actualDuration: finalDuration,
+                        type: data.config?.type,
+                        outcome: data.status === 'completed' ? 'COMPLETED' : 'ABORTED',
+                        tasks: data.tasks || []
+                    };
+                }));
+                setSessions(mappedSessions);
             }
             else if (activeTab === 'reports') {
                 // Fetch reports
@@ -97,23 +137,6 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
 
         } catch (e) { console.error("Admin Fetch Error:", e); }
         setIsRefreshing(false);
-    };
-
-    const mapSessions = (snap: any): SessionLog[] => {
-        return snap.docs.map((d: any) => {
-            const data = d.data();
-            return {
-                id: d.id,
-                user1: data.user1,
-                user2: data.user2,
-                startTime: data.createdAt?.toMillis() || Date.now(),
-                duration: data.config?.duration || 0,
-                actualDuration: data.endedAt ? Math.round((data.endedAt.toMillis() - data.createdAt.toMillis()) / 60000) : 0,
-                type: data.config?.type,
-                outcome: data.status === 'completed' ? 'COMPLETED' : 'ABORTED',
-                tasks: data.tasks || []
-            } as SessionLog;
-        });
     };
 
     // --- ACTIONS ---
@@ -180,7 +203,12 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
             if (modal.type === 'BAN') {
                 const userId = modal.data as string;
                 const until = Date.now() + banDuration * 60 * 60 * 1000;
-                await updateDoc(doc(db, 'users', userId), { bannedUntil: until, banReason: inputText });
+                // This update triggers the client side check instantly if using onSnapshot
+                await updateDoc(doc(db, 'users', userId), { 
+                    bannedUntil: until, 
+                    banReason: inputText,
+                    forceLogout: true // Flag to help client trigger logout
+                });
                 setUsers(prev => prev.map(u => u.id === userId ? { ...u, bannedUntil: until, banReason: inputText } : u));
             }
 
@@ -370,6 +398,13 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                                         </button>
                                     </div>
                                 </div>
+
+                                {/* NEW: Report Details Text */}
+                                {report.details && (
+                                    <div className="mb-4 bg-black/30 border border-white/5 p-3 rounded-lg text-sm text-slate-300 italic">
+                                        "{report.details}"
+                                    </div>
+                                )}
                                 
                                 <div className="bg-black/30 p-3 rounded-lg border border-white/5 flex items-center justify-between">
                                     <div>
@@ -477,7 +512,7 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                         <table className="w-full text-sm text-left">
                             <thead className="text-xs text-slate-500 uppercase bg-slate-950 border-b border-white/5">
                                 <tr>
-                                    <th className="px-6 py-4">ID</th>
+                                    <th className="px-6 py-4">Participants</th>
                                     <th className="px-6 py-4">Duration</th>
                                     <th className="px-6 py-4">Status</th>
                                     <th className="px-6 py-4 text-right">Date</th>
@@ -486,7 +521,12 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                             <tbody className="divide-y divide-white/5">
                                 {sessions.map(s => (
                                     <tr key={s.id} onClick={() => openSessionModal(s)} className="hover:bg-white/5 cursor-pointer">
-                                        <td className="px-6 py-4 font-mono text-slate-500 text-xs">{s.id.substring(0,8)}...</td>
+                                        <td className="px-6 py-4">
+                                            <div className="flex flex-col">
+                                                <span className="text-white font-medium">{s.user1}</span>
+                                                <span className="text-white font-medium">{s.user2}</span>
+                                            </div>
+                                        </td>
                                         <td className="px-6 py-4 font-bold text-white">{s.actualDuration}m <span className="text-slate-600 font-normal">/ {s.duration}m</span></td>
                                         <td className="px-6 py-4">
                                             <span className={`text-[10px] px-2 py-1 rounded-full ${s.outcome === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>{s.outcome}</span>

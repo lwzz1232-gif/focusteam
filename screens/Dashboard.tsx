@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Button } from '../components/Button';
 import { SessionType, SessionDuration, SessionConfig, SessionMode, User } from '../types';
-import { Briefcase, BookOpen, Code, Clock, Coffee, Play, FlaskConical, LogOut } from 'lucide-react';
+import { Briefcase, BookOpen, Code, Clock, Coffee, Play, FlaskConical } from 'lucide-react';
 
 interface DashboardProps {
   user: User;
@@ -27,8 +27,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogo
   ];
 
   const handleStart = () => {
-    // We send the config to App.tsx
-    // App.tsx handles the "Test Mode" logic automatically based on the duration
     onStartMatch({
       type: selectedType,
       duration: selectedDuration,
@@ -39,20 +37,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogo
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-4 max-w-5xl mx-auto w-full overflow-y-auto relative">
+    <div className="flex-1 flex flex-col items-center justify-center p-4 max-w-5xl mx-auto w-full overflow-y-auto">
       
-      {/* Logout Button - Top Right */}
-      <div className="absolute top-0 right-0 p-4">
-        <Button 
-            variant="ghost" 
-            onClick={onLogout} 
-            className="text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-        >
-            <LogOut size={18} className="mr-2"/> Logout
-        </Button>
-      </div>
-
-      <div className="w-full mb-6 text-center md:text-left pt-8">
+      {/* Header */}
+      <div className="w-full mb-6 text-center md:text-left">
         <h1 className="text-3xl font-bold mb-2">Configure Session</h1>
         <p className="text-slate-400">Choose your focus area and time block to find a match.</p>
       </div>
@@ -108,7 +96,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogo
               </button>
             ))}
 
-            {/* Test Mode Button - HIDDEN FOR REGULAR USERS */}
+            {/* Test Mode Button - Visible to ADMIN and DEV */}
             {(user.role === 'admin' || user.role === 'dev') && (
                <button
                   onClick={() => setSelectedDuration(SessionDuration.TEST)}

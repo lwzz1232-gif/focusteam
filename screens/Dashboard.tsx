@@ -1,169 +1,151 @@
 import React, { useState } from 'react';
 import { Button } from '../components/Button';
 import { SessionType, SessionDuration, SessionConfig, SessionMode, User, Partner } from '../types';
-// ADDED: LogOut icon
-import { Briefcase, BookOpen, Code, Clock, Coffee, Play, FlaskConical, LogOut } from 'lucide-react';
-
+import { Briefcase, BookOpen, Code, Clock, Coffee, Play, FlaskConical } from 'lucide-react';
+import { Button } from '../components/Button';
 interface DashboardProps {
-  user: User;
-  onStartMatch: (config: SessionConfig) => void;
-  // ADDED: Logout prop
-  onLogout: () => void;
+user: User;
+onStartMatch: (config: SessionConfig) => void;
+}
+export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch }) => {
+const [selectedType, setSelectedType] = useState<SessionType>(SessionType.STUDY);
+const [selectedDuration, setSelectedDuration] = useState<SessionDuration>(SessionDuration.MIN_30);
+const categories = [
+{ type: SessionType.STUDY, icon: BookOpen, desc: 'Academic focus' },
+{ type: SessionType.WORK, icon: Briefcase, desc: 'Professional tasks' },
+{ type: SessionType.CODING, icon: Code, desc: 'Programming blocks' },
+{ type: SessionType.READING, icon: Coffee, desc: 'Quiet reading' },
+];
+const durations = [
+{ val: SessionDuration.MIN_30, label: '30 Min', desc: 'Quick sprint' },
+{ val: SessionDuration.HOUR_1, label: '1 Hour', desc: 'Standard session' },
+{ val: SessionDuration.HOUR_2, label: '2 Hours', desc: 'Deep work' },
+];
+const handleStart = () => {
+// TEST MODE: Skip matching, go straight to session with bot
+if (selectedDuration === SessionDuration.TEST && user.role === 'admin') {
+// Create fake partner immediately
+const botPartner: Partner = {
+id: 'bot-test-user',
+name: 'Test Bot',
+type: selectedType
+};
+code
+Code
+// Skip to negotiation with instant config
+  const testConfig: SessionConfig = {
+    type: selectedType,
+    duration: SessionDuration.TEST,
+    mode: SessionMode.DEEP_WORK,
+    preTalkMinutes: 0.5, // 30s
+    postTalkMinutes: 0.5  // 30s
+  };
+  
+  // We need to modify App.tsx to handle this
+  // For now, trigger match immediately
+  setTimeout(() => {
+    onStartMatch(testConfig);
+  }, 500);
+  return;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogout }) => {
-  const [selectedType, setSelectedType] = useState<SessionType>(SessionType.STUDY);
-  const [selectedDuration, setSelectedDuration] = useState<SessionDuration>(SessionDuration.MIN_30);
-
-  const categories = [
-    { type: SessionType.STUDY, icon: BookOpen, desc: 'Academic focus' },
-    { type: SessionType.WORK, icon: Briefcase, desc: 'Professional tasks' },
-    { type: SessionType.CODING, icon: Code, desc: 'Programming blocks' },
-    { type: SessionType.READING, icon: Coffee, desc: 'Quiet reading' },
-  ];
-
-  const durations = [
-    { val: SessionDuration.MIN_30, label: '30 Min', desc: 'Quick sprint' },
-    { val: SessionDuration.HOUR_1, label: '1 Hour', desc: 'Standard session' },
-    { val: SessionDuration.HOUR_2, label: '2 Hours', desc: 'Deep work' },
-  ];
-
- const handleStart = () => {
-    // TEST MODE: Skip matching, go straight to session with bot
-    if (selectedDuration === SessionDuration.TEST && user.role === 'admin') {
-      // Create fake partner immediately
-      const botPartner: Partner = {
-        id: 'bot-test-user',
-        name: 'Test Bot',
-        type: selectedType
-      };
-      
-      // Skip to negotiation with instant config
-      const testConfig: SessionConfig = {
-        type: selectedType,
-        duration: SessionDuration.TEST,
-        mode: SessionMode.DEEP_WORK,
-        preTalkMinutes: 0.5, // 30s
-        postTalkMinutes: 0.5  // 30s
-      };
-      
-      // We need to modify App.tsx to handle this
-      // For now, trigger match immediately
-      setTimeout(() => {
-        onStartMatch(testConfig);
-      }, 500);
-      return;
-    }
-    
-    onStartMatch({
-      type: selectedType,
-      duration: selectedDuration,
-      mode: SessionMode.DEEP_WORK,
-      preTalkMinutes: 5,
-      postTalkMinutes: 5
-    });
-  };
-
-  return (
-    <div className="flex-1 flex flex-col items-center justify-center p-4 max-w-5xl mx-auto w-full overflow-y-auto relative">
-      
-      {/* NEW: Logout Button (Top Right) */}
-      <div className="absolute top-0 right-0 p-4">
-        <Button 
-            variant="ghost" 
-            onClick={onLogout} 
-            className="text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-        >
-            <LogOut size={18} className="mr-2"/> Logout
-        </Button>
-      </div>
-
-      <div className="w-full mb-6 text-center md:text-left pt-8">
-        <h1 className="text-3xl font-bold mb-2">Configure Session</h1>
-        <p className="text-slate-400">Choose your focus area and time block to find a match.</p>
-      </div>
-
-      <div className="grid md:grid-cols-2 gap-8 w-full mb-8">
-        {/* Session Type */}
-        <div className="space-y-4">
-          <h3 className="text-lg font-semibold text-slate-200 flex items-center gap-2">
-            <span className="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs">1</span>
-            What are you working on?
-          </h3>
-          <div className="grid grid-cols-2 gap-3">
-            {categories.map((cat) => (
-              <button
-                key={cat.type}
-                onClick={() => setSelectedType(cat.type)}
-                className={`p-4 rounded-xl border text-left transition-all ${
-                  selectedType === cat.type
-                    ? 'bg-blue-600/10 border-blue-500 text-white'
-                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-600'
-                }`}
-              >
-                <cat.icon className={`mb-2 ${selectedType === cat.type ? 'text-blue-400' : 'text-slate-500'}`} />
-                <div className="font-medium">{cat.type}</div>
-                <div className="text-xs opacity-60">{cat.desc}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Duration */}
-        <div className="space-y-4">
-          <h3 className="text-lg font-semibold text-slate-200 flex items-center gap-2">
-            <span className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-xs">2</span>
-            How long?
-          </h3>
-          <div className="space-y-3">
-            {durations.map((dur) => (
-              <button
-                key={dur.val}
-                onClick={() => setSelectedDuration(dur.val)}
-                className={`w-full p-4 rounded-xl border flex items-center justify-between transition-all ${
-                  selectedDuration === dur.val
-                    ? 'bg-emerald-600/10 border-emerald-500 text-white'
-                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-600'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <Clock size={18} className={selectedDuration === dur.val ? 'text-emerald-400' : 'text-slate-500'} />
-                  <div className="font-medium">{dur.label}</div>
-                </div>
-                <div className="text-xs opacity-60">{dur.desc}</div>
-              </button>
-            ))}
-
-            {/* Test Mode Button (Admin Only) */}
-            {user.role === 'admin' && (
-               <button
-                  onClick={() => setSelectedDuration(SessionDuration.TEST)}
-                  className={`w-full p-4 rounded-xl border flex items-center justify-between transition-all border-dashed ${
-                    selectedDuration === SessionDuration.TEST
-                      ? 'bg-amber-600/10 border-amber-500 text-amber-200'
-                      : 'bg-slate-900/50 border-slate-800 text-slate-500 hover:border-slate-600 hover:text-slate-400'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <FlaskConical size={18} className={selectedDuration === SessionDuration.TEST ? 'text-amber-400' : 'text-slate-500'} />
-                    <div className="font-medium">Test Mode (Dev)</div>
-                  </div>
-                  <div className="text-xs opacity-60">30s Phases</div>
-                </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="w-full max-w-md">
-        <Button 
-          onClick={handleStart}
-          className="w-full py-4 text-lg shadow-blue-500/25 shadow-xl"
-        >
-          <Play size={20} className="fill-current" />
-          Find Partner
-        </Button>
+onStartMatch({
+  type: selectedType,
+  duration: selectedDuration,
+  mode: SessionMode.DEEP_WORK,
+  preTalkMinutes: 5,
+  postTalkMinutes: 5
+});
+};
+return (
+<div className="flex-1 flex flex-col items-center justify-center p-4 max-w-5xl mx-auto w-full overflow-y-auto">
+<div className="w-full mb-6 text-center md:text-left">
+<h1 className="text-3xl font-bold mb-2">Configure Session</h1>
+<p className="text-slate-400">Choose your focus area and time block to find a match.</p>
+</div>
+code
+Code
+<div className="grid md:grid-cols-2 gap-8 w-full mb-8">
+    {/* Session Type */}
+    <div className="space-y-4">
+      <h3 className="text-lg font-semibold text-slate-200 flex items-center gap-2">
+        <span className="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs">1</span>
+        What are you working on?
+      </h3>
+      <div className="grid grid-cols-2 gap-3">
+        {categories.map((cat) => (
+          <button
+            key={cat.type}
+            onClick={() => setSelectedType(cat.type)}
+            className={`p-4 rounded-xl border text-left transition-all ${
+              selectedType === cat.type
+                ? 'bg-blue-600/10 border-blue-500 text-white'
+                : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-600'
+            }`}
+          >
+            <cat.icon className={`mb-2 ${selectedType === cat.type ? 'text-blue-400' : 'text-slate-500'}`} />
+            <div className="font-medium">{cat.type}</div>
+            <div className="text-xs opacity-60">{cat.desc}</div>
+          </button>
+        ))}
       </div>
     </div>
-  );
+
+    {/* Duration */}
+    <div className="space-y-4">
+      <h3 className="text-lg font-semibold text-slate-200 flex items-center gap-2">
+        <span className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-xs">2</span>
+        How long?
+      </h3>
+      <div className="space-y-3">
+        {durations.map((dur) => (
+          <button
+            key={dur.val}
+            onClick={() => setSelectedDuration(dur.val)}
+            className={`w-full p-4 rounded-xl border flex items-center justify-between transition-all ${
+              selectedDuration === dur.val
+                ? 'bg-emerald-600/10 border-emerald-500 text-white'
+                : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-600'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Clock size={18} className={selectedDuration === dur.val ? 'text-emerald-400' : 'text-slate-500'} />
+              <div className="font-medium">{dur.label}</div>
+            </div>
+            <div className="text-xs opacity-60">{dur.desc}</div>
+          </button>
+        ))}
+
+        {/* Test Mode Button (Admin Only) */}
+        {user.role === 'admin' && (
+           <button
+              onClick={() => setSelectedDuration(SessionDuration.TEST)}
+              className={`w-full p-4 rounded-xl border flex items-center justify-between transition-all border-dashed ${
+                selectedDuration === SessionDuration.TEST
+                  ? 'bg-amber-600/10 border-amber-500 text-amber-200'
+                  : 'bg-slate-900/50 border-slate-800 text-slate-500 hover:border-slate-600 hover:text-slate-400'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <FlaskConical size={18} className={selectedDuration === SessionDuration.TEST ? 'text-amber-400' : 'text-slate-500'} />
+                <div className="font-medium">Test Mode (Dev)</div>
+              </div>
+              <div className="text-xs opacity-60">30s Phases</div>
+            </button>
+        )}
+      </div>
+    </div>
+  </div>
+
+  <div className="w-full max-w-md">
+    <Button 
+      onClick={handleStart}
+      className="w-full py-4 text-lg shadow-blue-500/25 shadow-xl"
+    >
+      <Play size={20} className="fill-current" />
+      Find Partner
+    </Button>
+  </div>
+</div>
+);
 };

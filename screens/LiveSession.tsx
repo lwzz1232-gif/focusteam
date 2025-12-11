@@ -30,6 +30,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [isReadyForWebRTC, setIsReadyForWebRTC] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
 
+  // CRITICAL FIX: Ref to track phase inside Firebase listeners without causing re-renders
+  const phaseRef = useRef<SessionPhase>(SessionPhase.ICEBREAKER);
+
   // UI STATE
   const [micEnabled, setMicEnabled] = useState(true);
   const [camEnabled, setCamEnabled] = useState(true);
@@ -42,9 +45,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [showUI, setShowUI] = useState(true); 
   const [floatingEmojis, setFloatingEmojis] = useState<{id: number, emoji: string, left: number, rotation: number, scale: number}[]>([]); 
   
-  // NEW: Floating Messages State
+  // Floating Messages State
   const [floatingMessages, setFloatingMessages] = useState<{id: string, text: string, sender: string}[]>([]);
-  // NEW: Interaction State (To prevent UI hiding)
+  // Interaction State
   const [isInteracting, setIsInteracting] = useState(false);
 
   // EXIT MODAL STATE
@@ -55,7 +58,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [reportReason, setReportReason] = useState('Inappropriate Behavior');
   const [reportDetails, setReportDetails] = useState('');
 
-  // Draggable Self-Video State - Default lower for mobile
+  // Draggable Self-Video State
   const [selfPos, setSelfPos] = useState({ x: 20, y: 100 }); 
   const [isDragging, setIsDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
@@ -82,7 +85,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
   const { localStream, remoteStream } = useWebRTC(isReadyForWebRTC ? sessionId : '', user.id, isInitiator);
 
-  // --- 2. SYNC & REACTIONS ---
+  // --- 2. SYNC & REACTIONS (FIXED LOOP BUG) ---
   useEffect(() => {
     if (!sessionId) return;
 
@@ -90,8 +93,13 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
         if (!docSnap.exists()) return;
         const data = docSnap.data();
 
-        if (data.phase && data.phase !== phase) {
+        // CRITICAL FIX: Use phaseRef.current to check current state accurately
+        if (data.phase && data.phase !== phaseRef.current) {
+            // Update both State and Ref
             setPhase(data.phase as SessionPhase);
+            phaseRef.current = data.phase as SessionPhase;
+
+            // Only set time ONCE when phase actually changes
             if (data.phase === SessionPhase.FOCUS) {
                 setMicEnabled(false); 
                 setManualMicToggle(false); 
@@ -118,9 +126,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     });
     return () => unsub();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, user.id, config, isTest]); 
+  }, [sessionId, user.id, config, isTest]); // Removed 'phase' dependency to prevent re-subscription loops
 
-  // --- 3. ZEN MODE (UPDATED) ---
+  // --- 3. ZEN MODE ---
   useEffect(() => {
       const handleMouseMove = () => {
           setShowUI(true);
@@ -135,12 +143,10 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           }
       };
 
-      // If user starts interacting (typing, hovering), keep UI visible
       if (isInteracting) {
           setShowUI(true);
           if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
       } else {
-          // If interaction stops, restart the hide timer
           handleMouseMove();
       }
 
@@ -151,7 +157,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           window.removeEventListener('touchstart', handleMouseMove);
           if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
       };
-  }, [phase, isInteracting]); // Re-run when interaction state changes
+  }, [phase, isInteracting]); 
 
   // --- 4. TIMER ---
   useEffect(() => {
@@ -167,9 +173,12 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
   const handlePhaseTimeout = async () => {
     let nextPhase: SessionPhase | null = null;
-    if (phase === SessionPhase.ICEBREAKER) nextPhase = SessionPhase.FOCUS;
-    else if (phase === SessionPhase.FOCUS) nextPhase = SessionPhase.DEBRIEF;
-    else if (phase === SessionPhase.DEBRIEF) nextPhase = SessionPhase.COMPLETED;
+    // Use Ref for accurate current phase logic
+    const currentP = phaseRef.current; 
+    
+    if (currentP === SessionPhase.ICEBREAKER) nextPhase = SessionPhase.FOCUS;
+    else if (currentP === SessionPhase.FOCUS) nextPhase = SessionPhase.DEBRIEF;
+    else if (currentP === SessionPhase.DEBRIEF) nextPhase = SessionPhase.COMPLETED;
 
     if (nextPhase) await updateDoc(doc(db, 'sessions', sessionId), { phase: nextPhase }).catch(console.error);
   };
@@ -234,24 +243,22 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     }
   }, [micEnabled, camEnabled, localStream, phase]);
 
-  // --- CHAT/TASK SYNC & FLOATING MESSAGES ---
+  // --- CHAT/TASK SYNC & FLOATING MESSAGES (Aesthetic Update) ---
   const { messages: chatMessages, sendMessage } = useChat(sessionReady ? sessionId : '', user.id, user.name);
   
   useEffect(() => {
-    // Check if new message arrived from partner
     if (chatMessages.length > 0) {
         const lastMsg = chatMessages[chatMessages.length - 1];
         if (lastMsg.senderId !== 'me' && !isChatOpen) {
             setUnreadChatCount(prev => prev + 1);
             
-            // Add to floating messages
             const id = Date.now().toString();
+            // Store simple object
             setFloatingMessages(prev => [...prev, { id, text: lastMsg.text, sender: partner.name }]);
             
-            // Remove after 5 seconds
             setTimeout(() => {
                 setFloatingMessages(prev => prev.filter(m => m.id !== id));
-            }, 5000);
+            }, 6000); // 6s duration
         }
     }
     if (isChatOpen) setUnreadChatCount(0);
@@ -355,13 +362,13 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           10% { transform: translateY(-20px) scale(1.1); opacity: 1; }
           100% { transform: translateY(-150px) scale(1); opacity: 0; }
         }
-        @keyframes slideInRight {
-          0% { transform: translateX(100%); opacity: 0; }
-          100% { transform: translateX(0); opacity: 1; }
-        }
-        @keyframes fadeOut {
-          0% { opacity: 1; }
-          100% { opacity: 0; }
+        
+        /* NEW: Soft Bottom-Up Float for Messages */
+        @keyframes messageFloatUp {
+          0% { transform: translateY(20px) scale(0.95); opacity: 0; }
+          10% { transform: translateY(0) scale(1); opacity: 1; }
+          90% { transform: translateY(-10px) scale(1); opacity: 1; }
+          100% { transform: translateY(-20px) scale(0.95); opacity: 0; }
         }
       `}</style>
       
@@ -410,15 +417,17 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           ))}
       </div>
 
-      {/* NEW: FLOATING CHAT MESSAGES */}
-      <div className="absolute top-20 right-4 z-30 flex flex-col gap-2 pointer-events-none max-w-[250px]">
+      {/* NEW: AESTHETIC BOTTOM-UP FLOATING MESSAGES */}
+      <div className="absolute bottom-24 md:bottom-28 left-0 right-0 z-30 flex flex-col items-center gap-2 pointer-events-none">
           {floatingMessages.map(msg => (
               <div 
                 key={msg.id}
-                className="bg-slate-900/80 backdrop-blur-md border border-white/10 p-3 rounded-xl shadow-xl text-white text-sm animate-[slideInRight_0.3s_ease-out,fadeOut_0.5s_ease-in_4.5s_forwards]"
+                className="bg-black/60 backdrop-blur-md border border-white/10 px-4 py-2 rounded-full shadow-xl flex items-center gap-2 animate-[messageFloatUp_5s_ease-out_forwards]"
               >
-                  <span className="font-bold text-blue-400 text-xs">{msg.sender}:</span>
-                  <p>{msg.text}</p>
+                  <div className="w-5 h-5 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-[10px] font-bold text-white uppercase">
+                      {msg.sender.substring(0,1)}
+                  </div>
+                  <span className="text-slate-200 text-sm font-medium">{msg.text}</span>
               </div>
           ))}
       </div>
@@ -451,7 +460,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
         <div className="absolute top-4 md:top-6 left-4 md:left-6 pointer-events-auto">
             <button 
                 onClick={() => setIsReportOpen(true)} 
-                // NEW: Track Interaction
                 onMouseEnter={() => setIsInteracting(true)}
                 onMouseLeave={() => setIsInteracting(false)}
                 className="p-2.5 md:p-3 rounded-full bg-slate-900/40 text-slate-400 hover:text-red-400 hover:bg-slate-900 border border-slate-700/50 backdrop-blur-md transition-all hover:scale-105"
@@ -465,7 +473,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             <Button 
                 variant="danger" 
                 onClick={handleExitClick} 
-                // NEW: Track Interaction
                 onMouseEnter={() => setIsInteracting(true)}
                 onMouseLeave={() => setIsInteracting(false)}
                 className="py-2 px-3 text-xs bg-red-500/20 hover:bg-red-500/30 border-red-500/50 backdrop-blur-md"
@@ -474,7 +481,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             </Button>
         </div>
 
-        {/* MODAL / WINDOW CONTAINERS (With Interaction Tracking) */}
         <div 
             className="pointer-events-auto"
             onMouseEnter={() => setIsInteracting(true)}
@@ -528,14 +534,12 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             </div>
         )}
 
-        {/* MODALS SECTION - TRACK INTERACTION HERE TOO */}
         {(isReportOpen || exitModalStep > 0) && (
             <div 
                 className="absolute inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in"
                 onMouseEnter={() => setIsInteracting(true)}
                 onMouseLeave={() => setIsInteracting(false)}
             >
-                {/* REPORT MODAL */}
                 {isReportOpen && (
                     <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4 pointer-events-auto">
                         <div className="flex justify-between items-center">
@@ -565,7 +569,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                     </div>
                 )}
 
-                {/* EXIT MODAL */}
                 {exitModalStep > 0 && (
                     <div className="max-w-md w-full bg-slate-900 border border-white/10 rounded-2xl p-6 shadow-2xl relative overflow-hidden pointer-events-auto">
                         {exitModalStep === 1 ? (

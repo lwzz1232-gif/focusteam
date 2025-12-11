@@ -41,6 +41,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [isTaskBoardOpen, setIsTaskBoardOpen] = useState(false);
   const [showUI, setShowUI] = useState(true); 
   const [floatingEmojis, setFloatingEmojis] = useState<{id: number, emoji: string, left: number, rotation: number, scale: number}[]>([]); 
+  
+  // NEW: Floating Messages State
+  const [floatingMessages, setFloatingMessages] = useState<{id: string, text: string, sender: string}[]>([]);
+  // NEW: Interaction State (To prevent UI hiding)
+  const [isInteracting, setIsInteracting] = useState(false);
 
   // EXIT MODAL STATE
   const [exitModalStep, setExitModalStep] = useState<0 | 1 | 2>(0); 
@@ -115,23 +120,38 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, user.id, config, isTest]); 
 
-  // --- 3. ZEN MODE ---
+  // --- 3. ZEN MODE (UPDATED) ---
   useEffect(() => {
       const handleMouseMove = () => {
           setShowUI(true);
+          
           if (phase === SessionPhase.FOCUS) {
               if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-              controlsTimeoutRef.current = setTimeout(() => setShowUI(false), 3000);
+              
+              // Only hide if NOT interacting with UI
+              if (!isInteracting) {
+                  controlsTimeoutRef.current = setTimeout(() => setShowUI(false), 3000);
+              }
           }
       };
+
+      // If user starts interacting (typing, hovering), keep UI visible
+      if (isInteracting) {
+          setShowUI(true);
+          if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+      } else {
+          // If interaction stops, restart the hide timer
+          handleMouseMove();
+      }
+
       window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('touchstart', handleMouseMove); // Mobile support
+      window.addEventListener('touchstart', handleMouseMove); 
       return () => {
           window.removeEventListener('mousemove', handleMouseMove);
           window.removeEventListener('touchstart', handleMouseMove);
           if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
       };
-  }, [phase]);
+  }, [phase, isInteracting]); // Re-run when interaction state changes
 
   // --- 4. TIMER ---
   useEffect(() => {
@@ -214,11 +234,25 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     }
   }, [micEnabled, camEnabled, localStream, phase]);
 
-  // --- CHAT/TASK SYNC ---
+  // --- CHAT/TASK SYNC & FLOATING MESSAGES ---
   const { messages: chatMessages, sendMessage } = useChat(sessionReady ? sessionId : '', user.id, user.name);
+  
   useEffect(() => {
-    if (!isChatOpen && chatMessages.length > 0 && chatMessages[chatMessages.length-1].senderId !== 'me') {
-        setUnreadChatCount(prev => prev + 1);
+    // Check if new message arrived from partner
+    if (chatMessages.length > 0) {
+        const lastMsg = chatMessages[chatMessages.length - 1];
+        if (lastMsg.senderId !== 'me' && !isChatOpen) {
+            setUnreadChatCount(prev => prev + 1);
+            
+            // Add to floating messages
+            const id = Date.now().toString();
+            setFloatingMessages(prev => [...prev, { id, text: lastMsg.text, sender: partner.name }]);
+            
+            // Remove after 5 seconds
+            setTimeout(() => {
+                setFloatingMessages(prev => prev.filter(m => m.id !== id));
+            }, 5000);
+        }
     }
     if (isChatOpen) setUnreadChatCount(0);
   }, [chatMessages, isChatOpen]);
@@ -230,7 +264,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     return () => unsub();
   }, [sessionId, user.id]);
 
-  // --- DRAG (Touch & Mouse Support) ---
+  // --- DRAG ---
   const handleStartDrag = (clientX: number, clientY: number) => {
       setIsDragging(true);
       dragStart.current = { x: clientX - selfPos.x, y: clientY - selfPos.y };
@@ -244,9 +278,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           if (!isDragging) return;
           setSelfPos({ x: clientX - dragStart.current.x, y: clientY - dragStart.current.y });
       };
-      
       const handleMouseUp = () => setIsDragging(false);
-      
       const onMouseMove = (e: MouseEvent) => handleMove(e.clientX, e.clientY);
       const onTouchMove = (e: TouchEvent) => handleMove(e.touches[0].clientX, e.touches[0].clientY);
 
@@ -288,7 +320,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     else setPhase(SessionPhase.COMPLETED);
   };
 
-  // --- HANDLE EXIT ---
   const handleExitClick = () => {
     if (phase === SessionPhase.FOCUS) {
         setExitModalStep(1); 
@@ -323,6 +354,14 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           0% { transform: translateY(0) scale(0.8); opacity: 0; }
           10% { transform: translateY(-20px) scale(1.1); opacity: 1; }
           100% { transform: translateY(-150px) scale(1); opacity: 0; }
+        }
+        @keyframes slideInRight {
+          0% { transform: translateX(100%); opacity: 0; }
+          100% { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes fadeOut {
+          0% { opacity: 1; }
+          100% { opacity: 0; }
         }
       `}</style>
       
@@ -371,6 +410,19 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           ))}
       </div>
 
+      {/* NEW: FLOATING CHAT MESSAGES */}
+      <div className="absolute top-20 right-4 z-30 flex flex-col gap-2 pointer-events-none max-w-[250px]">
+          {floatingMessages.map(msg => (
+              <div 
+                key={msg.id}
+                className="bg-slate-900/80 backdrop-blur-md border border-white/10 p-3 rounded-xl shadow-xl text-white text-sm animate-[slideInRight_0.3s_ease-out,fadeOut_0.5s_ease-in_4.5s_forwards]"
+              >
+                  <span className="font-bold text-blue-400 text-xs">{msg.sender}:</span>
+                  <p>{msg.text}</p>
+              </div>
+          ))}
+      </div>
+
       <div 
         onMouseDown={handleMouseDown}
         onTouchStart={handleTouchStart}
@@ -386,7 +438,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
       <div className={`absolute inset-0 pointer-events-none z-40 transition-opacity duration-500 ${showUI ? 'opacity-100' : 'opacity-0'}`}>
         
-        {/* Top Bar - Adjusted margins for mobile */}
         <div className="absolute top-4 md:top-6 left-0 right-0 flex justify-center pointer-events-none px-14 md:px-0">
             <div className={`backdrop-blur-md border rounded-full px-4 md:px-6 py-2 flex items-center gap-2 md:gap-4 shadow-xl transition-all duration-500 ${phase === SessionPhase.FOCUS ? 'bg-black/60 border-red-500/30' : 'bg-slate-900/80 border-slate-700'}`}>
                 <span className={`text-[10px] md:text-xs font-bold uppercase tracking-wider ${phase === SessionPhase.FOCUS ? 'text-red-400' : 'text-slate-400'}`}>{phase}</span>
@@ -400,6 +451,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
         <div className="absolute top-4 md:top-6 left-4 md:left-6 pointer-events-auto">
             <button 
                 onClick={() => setIsReportOpen(true)} 
+                // NEW: Track Interaction
+                onMouseEnter={() => setIsInteracting(true)}
+                onMouseLeave={() => setIsInteracting(false)}
                 className="p-2.5 md:p-3 rounded-full bg-slate-900/40 text-slate-400 hover:text-red-400 hover:bg-slate-900 border border-slate-700/50 backdrop-blur-md transition-all hover:scale-105"
                 title="Report User"
             >
@@ -411,28 +465,34 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             <Button 
                 variant="danger" 
                 onClick={handleExitClick} 
+                // NEW: Track Interaction
+                onMouseEnter={() => setIsInteracting(true)}
+                onMouseLeave={() => setIsInteracting(false)}
                 className="py-2 px-3 text-xs bg-red-500/20 hover:bg-red-500/30 border-red-500/50 backdrop-blur-md"
             >
                 <LogOut size={14} className="mr-2"/> <span className="hidden md:inline">Exit</span>
             </Button>
         </div>
 
-        <div className="pointer-events-auto">
+        {/* MODAL / WINDOW CONTAINERS (With Interaction Tracking) */}
+        <div 
+            className="pointer-events-auto"
+            onMouseEnter={() => setIsInteracting(true)}
+            onMouseLeave={() => setIsInteracting(false)}
+            onTouchStart={() => setIsInteracting(true)}
+        >
              <ChatWindow messages={chatMessages} onSendMessage={sendMessage} partnerName={partner.name} isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
              <TaskBoard isOpen={isTaskBoardOpen} onClose={() => setIsTaskBoardOpen(false)} myTasks={myTasks} partnerTasks={partnerTasks} onAddTask={handleAddTask} onToggleTask={handleToggleTask} onDeleteTask={handleDeleteTask} isRevealed={phase !== SessionPhase.FOCUS} canEdit={phase === SessionPhase.ICEBREAKER} partnerName={partner.name} />
         </div>
 
-        {/* Bottom Control Bar - Responsive Layout */}
         <div className="absolute bottom-6 md:bottom-8 left-0 right-0 px-4 flex flex-col md:flex-row items-center justify-center gap-3 md:gap-4 pointer-events-auto">
              
-             {/* Reactions Bar - Stacked on top for mobile */}
              <div className="bg-slate-900/80 backdrop-blur-xl border border-white/10 rounded-full px-4 py-1.5 md:py-2 flex items-center gap-3 shadow-2xl order-1 md:order-none mb-1 md:mb-0">
                  <button onClick={() => handleReaction('🔥')} className="hover:bg-orange-500/20 hover:scale-110 active:scale-95 transition-all p-1.5 md:p-2 rounded-full text-xl md:text-2xl">🔥</button>
                  <button onClick={() => handleReaction('💯')} className="hover:bg-red-500/20 hover:scale-110 active:scale-95 transition-all p-1.5 md:p-2 rounded-full text-xl md:text-2xl">💯</button>
                  <button onClick={() => handleReaction('👋')} className="hover:bg-blue-500/20 hover:scale-110 active:scale-95 transition-all p-1.5 md:p-2 rounded-full text-xl md:text-2xl">👋</button>
              </div>
 
-             {/* Main Controls */}
              <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700 rounded-full p-2 flex items-center gap-2 shadow-2xl order-2 md:order-none">
                 {phase === SessionPhase.ICEBREAKER && (
                     <Button onClick={async () => { setIsLoadingIcebreaker(true); setIcebreaker(await generateIcebreaker(partner.type)); setIsLoadingIcebreaker(false); }} variant="ghost" className="rounded-full w-10 h-10 p-0 text-yellow-400 hover:bg-yellow-400/10" title="Icebreaker">
@@ -468,100 +528,69 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             </div>
         )}
 
-        {/* MODALS SECTION (UNCHANGED) */}
-        {isReportOpen && (
-            <div className="absolute inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
-                <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4 pointer-events-auto">
-                    <div className="flex justify-between items-center">
-                        <h3 className="text-white font-bold flex items-center gap-2">
-                            <Flag size={18} className="text-red-500"/> Report User
-                        </h3>
-                        <button onClick={() => setIsReportOpen(false)} className="text-slate-500 hover:text-white"><X size={20}/></button>
-                    </div>
-                    
-                    <div className="space-y-2">
-                        <label className="text-xs text-slate-400 uppercase font-bold">Reason</label>
-                        <select 
-                            value={reportReason}
-                            onChange={(e) => setReportReason(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm text-white focus:outline-none focus:border-red-500"
-                        >
-                            <option>Inappropriate Behavior</option>
-                            <option>Abusive Language</option>
-                            <option>Spam / Commercial</option>
-                            <option>Camera Off / Not Working</option>
-                            <option>Other</option>
-                        </select>
-                    </div>
-
-                    <div className="space-y-2">
-                        <label className="text-xs text-slate-400 uppercase font-bold">Details (Optional)</label>
-                        <textarea 
-                            value={reportDetails}
-                            onChange={(e) => setReportDetails(e.target.value)}
-                            placeholder="Describe what happened..."
-                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm text-white focus:outline-none focus:border-red-500 min-h-[80px] resize-none"
-                        />
-                    </div>
-
-                    <div className="flex gap-2 pt-2">
-                        <Button variant="secondary" onClick={() => setIsReportOpen(false)} className="flex-1">Cancel</Button>
-                        <Button variant="danger" onClick={handleReportSubmit} className="flex-1">Submit</Button>
-                    </div>
-                </div>
-            </div>
-        )}
-
-        {/* 2-STAGE EXIT MODAL */}
-        {exitModalStep > 0 && (
-            <div className="absolute inset-0 z-[70] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in zoom-in-95 duration-200 pointer-events-auto">
-                <div className="max-w-md w-full bg-slate-900 border border-white/10 rounded-2xl p-6 shadow-2xl relative overflow-hidden">
-                    {exitModalStep === 1 && (
-                        <div className="space-y-4 text-center">
-                            <div className="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center mx-auto mb-2">
-                                <HeartCrack size={32} className="text-blue-400" />
-                            </div>
-                            <h3 className="text-xl font-bold text-white">Wait, don't break the flow!</h3>
-                            <p className="text-slate-400 text-sm leading-relaxed">
-                                Leaving now disrupts the session rhythm for <b>{partner.name}</b>. 
-                                We strongly encourage finishing the focus block together.
-                            </p>
-                            <div className="grid grid-cols-2 gap-3 mt-6">
-                                <Button onClick={() => setExitModalStep(0)} variant="secondary" className="border-slate-700 hover:bg-slate-800">
-                                    I'll Stay
-                                </Button>
-                                <Button onClick={() => setExitModalStep(2)} className="bg-transparent border border-red-900/50 text-red-400 hover:bg-red-950 hover:text-red-300">
-                                    I Must Leave
-                                </Button>
-                            </div>
+        {/* MODALS SECTION - TRACK INTERACTION HERE TOO */}
+        {(isReportOpen || exitModalStep > 0) && (
+            <div 
+                className="absolute inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in"
+                onMouseEnter={() => setIsInteracting(true)}
+                onMouseLeave={() => setIsInteracting(false)}
+            >
+                {/* REPORT MODAL */}
+                {isReportOpen && (
+                    <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4 pointer-events-auto">
+                        <div className="flex justify-between items-center">
+                            <h3 className="text-white font-bold flex items-center gap-2">
+                                <Flag size={18} className="text-red-500"/> Report User
+                            </h3>
+                            <button onClick={() => setIsReportOpen(false)} className="text-slate-500 hover:text-white"><X size={20}/></button>
                         </div>
-                    )}
-
-                    {exitModalStep === 2 && (
-                        <div className="space-y-4 text-center animate-in slide-in-from-right-8">
-                            <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-2 border border-red-500/20">
-                                <AlertTriangle size={32} className="text-red-500" />
-                            </div>
-                            <h3 className="text-xl font-bold text-white">Warning: Reliability Strike</h3>
-                            <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-xs text-red-200 text-left">
-                                <ul className="list-disc pl-4 space-y-1">
-                                    <li>Leaving early counts as a <b>Strike</b>.</li>
-                                    <li>3 Strikes = <b>30 Minute Timeout</b>.</li>
-                                    <li>Frequent leaving may lead to a permanent ban.</li>
-                                </ul>
-                            </div>
-                            <p className="text-slate-500 text-xs">Are you absolutely sure you want to exit?</p>
-                            <div className="grid grid-cols-2 gap-3 mt-6">
-                                <Button onClick={() => setExitModalStep(0)} variant="secondary">
-                                    Go Back
-                                </Button>
-                                <Button onClick={confirmExitWithStrike} variant="danger">
-                                    Confirm Exit
-                                </Button>
-                            </div>
+                        <div className="space-y-2">
+                            <label className="text-xs text-slate-400 uppercase font-bold">Reason</label>
+                            <select value={reportReason} onChange={(e) => setReportReason(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm text-white">
+                                <option>Inappropriate Behavior</option>
+                                <option>Abusive Language</option>
+                                <option>Spam / Commercial</option>
+                                <option>Camera Off / Not Working</option>
+                                <option>Other</option>
+                            </select>
                         </div>
-                    )}
-                </div>
+                        <div className="space-y-2">
+                            <label className="text-xs text-slate-400 uppercase font-bold">Details</label>
+                            <textarea value={reportDetails} onChange={(e) => setReportDetails(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm text-white min-h-[80px] resize-none" />
+                        </div>
+                        <div className="flex gap-2 pt-2">
+                            <Button variant="secondary" onClick={() => setIsReportOpen(false)} className="flex-1">Cancel</Button>
+                            <Button variant="danger" onClick={handleReportSubmit} className="flex-1">Submit</Button>
+                        </div>
+                    </div>
+                )}
+
+                {/* EXIT MODAL */}
+                {exitModalStep > 0 && (
+                    <div className="max-w-md w-full bg-slate-900 border border-white/10 rounded-2xl p-6 shadow-2xl relative overflow-hidden pointer-events-auto">
+                        {exitModalStep === 1 ? (
+                            <div className="space-y-4 text-center">
+                                <div className="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center mx-auto mb-2"><HeartCrack size={32} className="text-blue-400" /></div>
+                                <h3 className="text-xl font-bold text-white">Wait, don't break the flow!</h3>
+                                <p className="text-slate-400 text-sm">Leaving now disrupts the session rhythm for <b>{partner.name}</b>.</p>
+                                <div className="grid grid-cols-2 gap-3 mt-6">
+                                    <Button onClick={() => setExitModalStep(0)} variant="secondary" className="border-slate-700 hover:bg-slate-800">I'll Stay</Button>
+                                    <Button onClick={() => setExitModalStep(2)} className="bg-transparent border border-red-900/50 text-red-400 hover:bg-red-950">I Must Leave</Button>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="space-y-4 text-center animate-in slide-in-from-right-8">
+                                <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-2 border border-red-500/20"><AlertTriangle size={32} className="text-red-500" /></div>
+                                <h3 className="text-xl font-bold text-white">Warning: Reliability Strike</h3>
+                                <p className="text-slate-500 text-xs">Leaving early counts as a Strike. 3 Strikes = Timeout.</p>
+                                <div className="grid grid-cols-2 gap-3 mt-6">
+                                    <Button onClick={() => setExitModalStep(0)} variant="secondary">Go Back</Button>
+                                    <Button onClick={confirmExitWithStrike} variant="danger">Confirm Exit</Button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
         )}
 

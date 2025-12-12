@@ -61,16 +61,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogo
   return (
     <div className="flex-1 flex flex-col items-center justify-start p-4 max-w-5xl mx-auto w-full overflow-y-auto relative">
       
-      {/* Logout Button */}
-      <div className="absolute top-0 right-0 p-4 z-20">
-        <Button 
-            variant="ghost" 
-            onClick={onLogout} 
-            className="text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-        >
-            <LogOut size={18} className="mr-2"/> Logout
-        </Button>
-      </div>
+      {/* Logout Button */
 
       {/* --- NEW: DYNAMIC LOBBY NOTIFICATION --- */}
       {lobbyCount > 0 && (

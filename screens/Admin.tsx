@@ -79,23 +79,45 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                         u2Name = data.user2 || 'Unknown';
                     }
 
-                    // Fix duration logic
-                    let finalDuration = 0;
-                    if (data.endedAt && data.createdAt) {
-                        finalDuration = Math.round((data.endedAt.toMillis() - data.createdAt.toMillis()) / 60000);
-                    } else if (data.status === 'completed') {
-                        finalDuration = data.config?.duration || 0;
+                    // --- FIX START: Better Time Calculation ---
+                    const startMs = data.createdAt?.toMillis() || Date.now();
+                    let endMs = data.endedAt?.toMillis();
+
+                    // If endedAt is missing (user aborted/left), try using the last update time
+                    if (!endMs && data.updatedAt) {
+                        endMs = data.updatedAt.toMillis();
                     }
+                    // If still active/live, use "now"
+                    if (!endMs && data.status === 'active') {
+                        endMs = Date.now();
+                    }
+
+                    let finalDuration = 0;
+                    if (endMs && startMs) {
+                        finalDuration = Math.max(0, Math.floor((endMs - startMs) / 60000));
+                    }
+                    
+                    // Fallback: If duration is 0 but it says completed, use the config duration
+                    if (finalDuration === 0 && data.status === 'completed') {
+                         finalDuration = data.config?.duration || 0;
+                    }
+
+                    // Better Status Labeling
+                    let outcomeLabel = 'ABORTED';
+                    if (data.status === 'completed') outcomeLabel = 'COMPLETED';
+                    else if (data.status === 'active') outcomeLabel = 'LIVE';
+                    else if (finalDuration > 0) outcomeLabel = 'PARTIAL'; // Shows PARTIAL if time was spent
+                    // --- FIX END ---
 
                     return {
                         id: d.id,
                         user1: u1Name,
                         user2: u2Name,
-                        startTime: data.createdAt?.toMillis() || Date.now(),
+                        startTime: startMs,
                         duration: data.config?.duration || 0,
                         actualDuration: finalDuration,
                         type: data.config?.type,
-                        outcome: data.status === 'completed' ? 'COMPLETED' : 'ABORTED',
+                        outcome: outcomeLabel,
                         tasks: data.tasks || []
                     };
                 });
@@ -521,7 +543,7 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                                         </td>
                                         <td className="px-6 py-4 font-bold text-white">{s.actualDuration}m <span className="text-slate-600 font-normal">/ {s.duration}m</span></td>
                                         <td className="px-6 py-4">
-                                            <span className={`text-[10px] px-2 py-1 rounded-full ${s.outcome === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>{s.outcome}</span>
+                                            <span className={`text-[10px] px-2 py-1 rounded-full ${s.outcome === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400' : s.outcome === 'PARTIAL' ? 'bg-amber-500/10 text-amber-400' : s.outcome === 'LIVE' ? 'bg-blue-500/10 text-blue-400' : 'bg-red-500/10 text-red-400'}`}>{s.outcome}</span>
                                         </td>
                                         <td className="px-6 py-4 text-right text-slate-500 text-xs">{new Date(s.startTime).toLocaleDateString()}</td>
                                     </tr>

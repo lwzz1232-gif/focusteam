@@ -2,34 +2,31 @@ import { useEffect, useRef, useState } from 'react';
 import { db } from '../utils/firebaseConfig';
 import { collection, doc, onSnapshot, updateDoc, addDoc } from 'firebase/firestore';
 
-// --- UPDATED CONFIGURATION WITH METERED.CA ---
+// --- ULTIMATE SERVER CONFIGURATION ---
 const SERVERS = {
   iceServers: [
-    // 1. Google STUN (Backup)
+    // 1. GOOGLE STUN POOL (Maximum Redundancy)
+    // We mix port 19302 (Google Standard) and 3478 (Industry Standard)
     { 
       urls: [
         'stun:stun1.l.google.com:19302',
         'stun:stun2.l.google.com:19302',
+        'stun:stun1.l.google.com:3478',
+        'stun:stun3.l.google.com:3478',
+        'stun:stun4.l.google.com:19302',
       ] 
     },
-    // 2. METERED.CA TURN SERVERS (The 4G/5G Fix)
+    // 2. YOUR ORACLE TURN - Standard Port (The "Off-Road" Mode for 4G/5G)
     {
-      urls: "stun:stun.relay.metered.ca:80",
+      urls: "turn:92.5.104.21:3478", 
+      username: "focustwin",
+      credential: "focustwin123", 
     },
+    // 3. YOUR ORACLE TURN - Stealth Port (For Schools/Offices)
     {
-      urls: "turn:global.relay.metered.ca:80",
-      username: "13dcd8d78e5f8c8601908847",
-      credential: "H5VMgS+huy6pYXCI",
-    },
-    {
-      urls: "turn:global.relay.metered.ca:80?transport=tcp",
-      username: "13dcd8d78e5f8c8601908847",
-      credential: "H5VMgS+huy6pYXCI",
-    },
-    {
-      urls: "turn:global.relay.metered.ca:443",
-      username: "13dcd8d78e5f8c8601908847",
-      credential: "H5VMgS+huy6pYXCI",
+      urls: "turn:92.5.104.21:443", 
+      username: "focustwin",
+      credential: "focustwin123", 
     }
   ],
   iceCandidatePoolSize: 10,
@@ -55,7 +52,7 @@ export const useWebRTC = (sessionId: string, userId: string, isInitiator: boolea
     const setupConnection = async () => {
       console.log(`[WEBRTC] Initializing. Role: ${isInitiator ? 'Caller' : 'Callee'}`);
 
-      // 1. Initialize PeerConnection with TURN servers
+      // 1. Initialize PeerConnection with ULTIMATE servers
       pc.current = new RTCPeerConnection(SERVERS);
 
       pc.current.oniceconnectionstatechange = () => {
@@ -197,6 +194,7 @@ export const useWebRTC = (sessionId: string, userId: string, isInitiator: boolea
 
     setupConnection();
 
+    // CLEANUP
     return () => {
       isMounted = false;
       console.log('[WEBRTC] Cleaning up connection');

@@ -66,7 +66,7 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                 const mappedSessions = snap.docs.map((d) => {
                     const data = d.data();
                     
-                    // FIXED: Correctly read participant info from array
+                    // User Info Logic
                     let u1Name = 'Unknown';
                     let u2Name = 'Unknown';
                     
@@ -74,47 +74,58 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                         u1Name = data.participantInfo[0]?.displayName || 'Unknown';
                         u2Name = data.participantInfo[1]?.displayName || 'Unknown';
                     } else {
-                        // Fallback to legacy fields if any
                         u1Name = data.user1 || 'Unknown';
                         u2Name = data.user2 || 'Unknown';
                     }
 
-                    // --- FIX START: Better Time Calculation ---
+                    // --- ZOMBIE SESSION FIX START ---
                     const startMs = data.createdAt?.toMillis() || Date.now();
+                    const configDuration = data.config?.duration || 30; // Default 30 mins
+                    
+                    // We consider a session "Zombie" (crashed) if it is 'active' 
+                    // but the time passed is Config Duration + 20 Minutes Buffer.
+                    const maxReasonableTime = startMs + (configDuration * 60000) + (20 * 60000);
+                    const isZombie = data.status === 'active' && Date.now() > maxReasonableTime;
+
                     let endMs = data.endedAt?.toMillis();
 
-                    // If endedAt is missing (user aborted/left), try using the last update time
-                    if (!endMs && data.updatedAt) {
-                        endMs = data.updatedAt.toMillis();
-                    }
-                    // If still active/live, use "now"
-                    if (!endMs && data.status === 'active') {
-                        endMs = Date.now();
+                    // If no official end time...
+                    if (!endMs) {
+                        if (data.status === 'active' && !isZombie) {
+                            // Truly LIVE: Use current time to show progress
+                            endMs = Date.now();
+                        } else {
+                            // Zombie or Aborted: Use the last time the DB was updated (or start time if missing)
+                            // This stops the timer from growing forever.
+                            endMs = data.updatedAt?.toMillis() || startMs;
+                        }
                     }
 
+                    // Calculate Duration
                     let finalDuration = 0;
                     if (endMs && startMs) {
                         finalDuration = Math.max(0, Math.floor((endMs - startMs) / 60000));
                     }
                     
-                    // Fallback: If duration is 0 but it says completed, use the config duration
+                    // Fallback logic for Completed sessions
                     if (finalDuration === 0 && data.status === 'completed') {
-                         finalDuration = data.config?.duration || 0;
+                         finalDuration = configDuration;
                     }
 
-                    // Better Status Labeling
+                    // Determine Label
                     let outcomeLabel = 'ABORTED';
                     if (data.status === 'completed') outcomeLabel = 'COMPLETED';
-                    else if (data.status === 'active') outcomeLabel = 'LIVE';
-                    else if (finalDuration > 0) outcomeLabel = 'PARTIAL'; // Shows PARTIAL if time was spent
-                    // --- FIX END ---
+                    else if (data.status === 'active' && !isZombie) outcomeLabel = 'LIVE';
+                    else if (isZombie) outcomeLabel = 'TIMED OUT'; // Distinguish zombies
+                    else if (finalDuration > 0) outcomeLabel = 'PARTIAL';
+                    // --- ZOMBIE SESSION FIX END ---
 
                     return {
                         id: d.id,
                         user1: u1Name,
                         user2: u2Name,
                         startTime: startMs,
-                        duration: data.config?.duration || 0,
+                        duration: configDuration,
                         actualDuration: finalDuration,
                         type: data.config?.type,
                         outcome: outcomeLabel,
@@ -543,7 +554,7 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                                         </td>
                                         <td className="px-6 py-4 font-bold text-white">{s.actualDuration}m <span className="text-slate-600 font-normal">/ {s.duration}m</span></td>
                                         <td className="px-6 py-4">
-                                            <span className={`text-[10px] px-2 py-1 rounded-full ${s.outcome === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400' : s.outcome === 'PARTIAL' ? 'bg-amber-500/10 text-amber-400' : s.outcome === 'LIVE' ? 'bg-blue-500/10 text-blue-400' : 'bg-red-500/10 text-red-400'}`}>{s.outcome}</span>
+                                            <span className={`text-[10px] px-2 py-1 rounded-full ${s.outcome === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400' : s.outcome === 'PARTIAL' ? 'bg-amber-500/10 text-amber-400' : s.outcome === 'LIVE' ? 'bg-blue-500/10 text-blue-400' : s.outcome === 'TIMED OUT' ? 'bg-slate-700 text-slate-300' : 'bg-red-500/10 text-red-400'}`}>{s.outcome}</span>
                                         </td>
                                         <td className="px-6 py-4 text-right text-slate-500 text-xs">{new Date(s.startTime).toLocaleDateString()}</td>
                                     </tr>

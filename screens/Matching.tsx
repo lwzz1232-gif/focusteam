@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { SessionConfig, Partner, User } from '../types';
 import { Loader2, AlertTriangle, ExternalLink } from 'lucide-react';
 import { useMatchmaking } from '../hooks/useMatchmaking';
 import { db } from '../utils/firebaseConfig';
-import { doc, onSnapshot, collection } from 'firebase/firestore';
+import { doc, onSnapshot, collection, addDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 
 interface MatchingProps {
   user: User;
@@ -16,6 +16,9 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
   const [statusText, setStatusText] = useState("Connecting to queue...");
   const [sessionIdToWatch, setSessionIdToWatch] = useState<string | null>(null);
   const [hasCalledOnMatch, setHasCalledOnMatch] = useState(false);
+  
+  // NEW: Ref to track our public lobby document
+  const lobbyTicketRef = useRef<string | null>(null);
 
   // Use the matchmaking hook
   const { status, joinQueue, cancelSearch, error } = useMatchmaking(user, (partner, sessionId) => {
@@ -32,63 +35,79 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
     return () => {
       console.log('[MATCHING] Component unmounting, canceling search');
       cancelSearch();
+      // NEW: Cleanup lobby ticket if it exists
+      if (lobbyTicketRef.current) {
+        deleteDoc(doc(db, 'waiting_room', lobbyTicketRef.current)).catch(console.error);
+      }
     };
   }, [config, joinQueue, cancelSearch]);
 
-  // Listen to session document once we have a session ID
-  // This ensures BOTH users are properly matched before proceeding
- // Listen to session document once we have a session ID
-useEffect(() => {
-  if (!sessionIdToWatch || hasCalledOnMatch) {
-    return;
-  }
+  // --- NEW: LOBBY BROADCAST LOGIC ---
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
 
-  console.log('[MATCHING] Watching session:', sessionIdToWatch);
-
-  const sessionsColl = collection(db, 'sessions');
-  const sessionRef = doc(sessionsColl, sessionIdToWatch);
-
-  const unsubscribe = onSnapshot(
-    sessionRef,
-    (snap) => {
-      if (!snap.exists()) {
-        console.warn('[MATCHING] Session was deleted');
-        return;
-      }
-
-      const sessionData = snap.data() as any;
-
-      console.log('[MATCHING] Session update:', {
-        participants: sessionData.participants?.length || 0,
-        started: sessionData.started
-      });
-
-      // NEW: Check if already started (might have missed the 2-participant state)
-      if (sessionData.started === true && !hasCalledOnMatch) {
-        console.log('[MATCHING] Session already started, joining immediately');
-        setHasCalledOnMatch(true);
-        
-        const participantInfo: any[] = sessionData.participantInfo || [];
-        const partnerInfo = participantInfo.find((p: any) => p.userId !== user.id);
-
-        if (partnerInfo) {
-          const partner: Partner = {
-            id: partnerInfo.userId,
-            name: partnerInfo.displayName || 'Partner',
-            type: sessionData.config?.type || 'ANY',
-          };
-
-          console.log('[MATCHING] Calling onMatched (already started):', partner);
-          onMatched(partner, sessionIdToWatch);
+    // Only start timer if we are actively searching and haven't found a session yet
+    if (status === 'SEARCHING' && !sessionIdToWatch) {
+        timeoutId = setTimeout(async () => {
+            try {
+                // Double check we are still searching before posting
+                if (!sessionIdToWatch && !lobbyTicketRef.current) {
+                    console.log("[MATCHING] 10s passed. Broadcasting to Live Lobby...");
+                    
+                    const lobbyRef = await addDoc(collection(db, 'waiting_room'), {
+                        userId: user.id,
+                        userName: user.name,
+                        config: config,
+                        createdAt: serverTimestamp()
+                    });
+                    
+                    lobbyTicketRef.current = lobbyRef.id;
+                    setStatusText("Broadcasted to Lobby. Waiting for joiner...");
+                }
+            } catch (e) {
+                console.error("Lobby broadcast failed", e);
+            }
+        }, 10000); // 10 Seconds
+    } else {
+        // If status changes (e.g. MATCHED) or session found, remove from lobby
+        if (lobbyTicketRef.current) {
+            deleteDoc(doc(db, 'waiting_room', lobbyTicketRef.current)).catch(console.error);
+            lobbyTicketRef.current = null;
         }
-        return;
-      }
+    }
 
-      // Wait for session to have 2 participants
-      if (Array.isArray(sessionData.participants) && sessionData.participants.length >= 2) {
-        console.log('[MATCHING] Session has 2 participants, proceeding to negotiation');
-        
-        if (!hasCalledOnMatch) {
+    return () => clearTimeout(timeoutId);
+  }, [status, sessionIdToWatch, user, config]);
+
+  // Listen to session document once we have a session ID
+  useEffect(() => {
+    if (!sessionIdToWatch || hasCalledOnMatch) {
+      return;
+    }
+
+    console.log('[MATCHING] Watching session:', sessionIdToWatch);
+
+    const sessionsColl = collection(db, 'sessions');
+    const sessionRef = doc(sessionsColl, sessionIdToWatch);
+
+    const unsubscribe = onSnapshot(
+      sessionRef,
+      (snap) => {
+        if (!snap.exists()) {
+          console.warn('[MATCHING] Session was deleted');
+          return;
+        }
+
+        const sessionData = snap.data() as any;
+
+        console.log('[MATCHING] Session update:', {
+          participants: sessionData.participants?.length || 0,
+          started: sessionData.started
+        });
+
+        // Check if already started
+        if (sessionData.started === true && !hasCalledOnMatch) {
+          console.log('[MATCHING] Session already started, joining immediately');
           setHasCalledOnMatch(true);
           
           const participantInfo: any[] = sessionData.participantInfo || [];
@@ -101,25 +120,46 @@ useEffect(() => {
               type: sessionData.config?.type || 'ANY',
             };
 
-            console.log('[MATCHING] Calling onMatched with partner:', partner);
             onMatched(partner, sessionIdToWatch);
           }
+          return;
         }
+
+        // Wait for session to have 2 participants
+        if (Array.isArray(sessionData.participants) && sessionData.participants.length >= 2) {
+          console.log('[MATCHING] Session has 2 participants, proceeding to negotiation');
+          
+          if (!hasCalledOnMatch) {
+            setHasCalledOnMatch(true);
+            
+            const participantInfo: any[] = sessionData.participantInfo || [];
+            const partnerInfo = participantInfo.find((p: any) => p.userId !== user.id);
+
+            if (partnerInfo) {
+              const partner: Partner = {
+                id: partnerInfo.userId,
+                name: partnerInfo.displayName || 'Partner',
+                type: sessionData.config?.type || 'ANY',
+              };
+
+              onMatched(partner, sessionIdToWatch);
+            }
+          }
+        }
+      },
+      (error) => {
+        console.error('[MATCHING] Session listener error:', error);
       }
-    },
-    (error) => {
-      console.error('[MATCHING] Session listener error:', error);
-    }
-  );
+    );
 
-  return () => {
-    unsubscribe();
-  };
-}, [sessionIdToWatch, user.id, onMatched, hasCalledOnMatch]);
+    return () => {
+      unsubscribe();
+    };
+  }, [sessionIdToWatch, user.id, onMatched, hasCalledOnMatch]);
 
-  // Update status text
+  // Update status text (Only if we haven't broadcasted to lobby yet)
   useEffect(() => {
-    if (status === 'SEARCHING') {
+    if (status === 'SEARCHING' && !lobbyTicketRef.current) {
       const msgs = [
         `Looking for ${config.type} sessions...`,
         `Finding ${config.duration}m duration partner...`,
@@ -133,13 +173,13 @@ useEffect(() => {
       }, 2000);
       return () => clearInterval(interval);
     } else if (status === 'MATCHED') {
-      setStatusText("Match Found! Connecting.. .");
+      setStatusText("Match Found! Connecting...");
     }
   }, [status, config]);
 
   // Extract link from Firebase error if present
   const indexLink = error && error.includes('https://console.firebase.google.com') 
-    ? error.match(/https:\/\/console\.firebase\.google\. com[^\s]*/)?.[0] 
+    ? error.match(/https:\/\/console\.firebase\.google\.com[^\s]*/)?.[0] 
     : null;
 
   return (

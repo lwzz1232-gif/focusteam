@@ -2,14 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Partner, SessionPhase, User, SessionConfig, SessionDuration, TodoItem } from '../types';
 import { Button } from '../components/Button';
 import { generateIcebreaker } from '../services/geminiService';
-import { Mic, MicOff, Video, VideoOff, Sparkles, LogOut, Lock, User as UserIcon, MessageSquare, ListChecks, ThumbsUp, Heart, Zap, Smile, Flag, X, AlertTriangle, HeartCrack } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, Sparkles, LogOut, User as UserIcon, MessageSquare, ListChecks, Flag, X, AlertTriangle, HeartCrack, CheckCircle2 } from 'lucide-react';
 import { ChatWindow } from '../components/ChatWindow';
 import { TaskBoard } from '../components/TaskBoard';
 import { SessionRecap } from '../components/SessionRecap';
 import { useChat } from '../hooks/useChat'; 
 import { useWebRTC } from '../hooks/useWebRTC'; 
 import { db } from '../utils/firebaseConfig';
-import { collection, query, where, updateDoc, doc, addDoc, onSnapshot, deleteDoc, serverTimestamp, increment, getDoc } from 'firebase/firestore';
+import { collection, query, where, updateDoc, doc, addDoc, onSnapshot, deleteDoc, serverTimestamp, increment } from 'firebase/firestore';
 
 interface LiveSessionProps {
   user: User;
@@ -22,7 +22,7 @@ interface LiveSessionProps {
 export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config, sessionId, onEndSession }) => {
   const isTest = config.duration === SessionDuration.TEST;
   
-  // LOGIC STATE
+  // --- LOGIC STATE ---
   const [phase, setPhase] = useState<SessionPhase>(SessionPhase.ICEBREAKER);
   const [timeLeft, setTimeLeft] = useState(isTest ? 30 : config.preTalkMinutes * 60); 
   const [startTime] = useState(Date.now());
@@ -30,10 +30,10 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [isReadyForWebRTC, setIsReadyForWebRTC] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
 
-  // CRITICAL FIX: Ref to track phase inside Firebase listeners without causing re-renders
+  // Ref to track phase inside Firebase listeners
   const phaseRef = useRef<SessionPhase>(SessionPhase.ICEBREAKER);
 
-  // UI STATE
+  // --- UI STATE ---
   const [micEnabled, setMicEnabled] = useState(true);
   const [camEnabled, setCamEnabled] = useState(true);
   const [manualMicToggle, setManualMicToggle] = useState(true);
@@ -43,11 +43,13 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [isTaskBoardOpen, setIsTaskBoardOpen] = useState(false);
   const [showUI, setShowUI] = useState(true); 
-  const [floatingEmojis, setFloatingEmojis] = useState<{id: number, emoji: string, left: number, rotation: number, scale: number}[]>([]); 
   
-  // Floating Messages State
+  // REPLACED: Floating Emojis -> Ripples & Aura
+  const [ripples, setRipples] = useState<{id: number, x: number, y: number}[]>([]);
+  const [aura, setAura] = useState<'neutral' | 'fire' | 'power' | 'wave' | null>(null);
+
+  // Floating Messages State (Chat bubbles)
   const [floatingMessages, setFloatingMessages] = useState<{id: string, text: string, sender: string}[]>([]);
-  // Interaction State
   const [isInteracting, setIsInteracting] = useState(false);
 
   // EXIT MODAL STATE
@@ -73,6 +75,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const myVideoRef = useRef<HTMLVideoElement>(null);
   const partnerVideoRef = useRef<HTMLVideoElement>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const auraTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // --- 1. SETUP & WEBRTC ---
   useEffect(() => {
@@ -85,7 +88,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
   const { localStream, remoteStream } = useWebRTC(isReadyForWebRTC ? sessionId : '', user.id, isInitiator);
 
-  // --- 2. SYNC & REACTIONS (FIXED LOOP BUG) ---
+  // --- 2. SYNC & REACTIONS ---
   useEffect(() => {
     if (!sessionId) return;
 
@@ -93,13 +96,10 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
         if (!docSnap.exists()) return;
         const data = docSnap.data();
 
-        // CRITICAL FIX: Use phaseRef.current to check current state accurately
         if (data.phase && data.phase !== phaseRef.current) {
-            // Update both State and Ref
             setPhase(data.phase as SessionPhase);
             phaseRef.current = data.phase as SessionPhase;
 
-            // Only set time ONCE when phase actually changes
             if (data.phase === SessionPhase.FOCUS) {
                 setMicEnabled(false); 
                 setManualMicToggle(false); 
@@ -113,9 +113,10 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             }
         }
 
+        // Logic Change: Reactions trigger Aura instead of floating emojis
         if (data.lastReaction && data.lastReaction.senderId !== user.id) {
             if (Date.now() - data.lastReaction.timestamp < 2000) {
-                triggerLocalReaction(data.lastReaction.emoji);
+                triggerAura(data.lastReaction.emoji);
             }
         }
 
@@ -126,19 +127,18 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     });
     return () => unsub();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, user.id, config, isTest]); // Removed 'phase' dependency to prevent re-subscription loops
+  }, [sessionId, user.id, config, isTest]);
 
-  // --- 3. ZEN MODE ---
+  // --- 3. ZEN MODE / MOUSE HANDLING ---
   useEffect(() => {
       const handleMouseMove = () => {
           setShowUI(true);
           
+          // In focus mode, hide UI faster (2s) to encourage work
           if (phase === SessionPhase.FOCUS) {
               if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-              
-              // Only hide if NOT interacting with UI
               if (!isInteracting) {
-                  controlsTimeoutRef.current = setTimeout(() => setShowUI(false), 3000);
+                  controlsTimeoutRef.current = setTimeout(() => setShowUI(false), 2000);
               }
           }
       };
@@ -173,7 +173,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
   const handlePhaseTimeout = async () => {
     let nextPhase: SessionPhase | null = null;
-    // Use Ref for accurate current phase logic
     const currentP = phaseRef.current; 
     
     if (currentP === SessionPhase.ICEBREAKER) nextPhase = SessionPhase.FOCUS;
@@ -183,25 +182,43 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     if (nextPhase) await updateDoc(doc(db, 'sessions', sessionId), { phase: nextPhase }).catch(console.error);
   };
 
+  // --- REACTION LOGIC (UPDATED) ---
   const handleReaction = async (emoji: string) => {
       const now = Date.now();
       if (now - lastReactionTime.current < 800) return; 
       lastReactionTime.current = now;
 
-      triggerLocalReaction(emoji);
+      // Trigger local aura immediately
+      triggerAura(emoji);
+      
       await updateDoc(doc(db, 'sessions', sessionId), {
           lastReaction: { emoji, senderId: user.id, timestamp: Date.now() }
       }).catch(console.error);
   };
 
-  const triggerLocalReaction = (emoji: string) => {
-      const id = Date.now();
-      const left = Math.random() * 60 + 20; 
-      const rotation = Math.random() * 30 - 15; 
-      const scale = Math.random() * 0.5 + 1; 
+  const triggerAura = (emoji: string) => {
+      let type: 'fire' | 'power' | 'wave' = 'wave';
+      if (emoji === '🔥') type = 'fire';
+      if (emoji === '💯') type = 'power';
       
-      setFloatingEmojis(prev => [...prev, { id, emoji, left, rotation, scale }]);
-      setTimeout(() => setFloatingEmojis(prev => prev.filter(e => e.id !== id)), 2500);
+      setAura(type);
+      
+      if (auraTimeoutRef.current) clearTimeout(auraTimeoutRef.current);
+      auraTimeoutRef.current = setTimeout(() => setAura(null), 2500);
+  };
+
+  const handlePartnerClick = (e: React.MouseEvent) => {
+      // Create ripple at click coordinates relative to the container
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      
+      const id = Date.now();
+      setRipples(prev => [...prev, { id, x, y }]);
+      setTimeout(() => setRipples(prev => prev.filter(r => r.id !== id)), 1000);
+
+      // Optional: Send a generic "wave" reaction if clicking
+      handleReaction('👋'); 
   };
 
   // --- 5. REPORT ---
@@ -222,7 +239,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           alert("Report submitted successfully.");
       } catch (e) {
           console.error("Report error:", e);
-          alert("Failed to submit report.");
       }
   };
 
@@ -243,7 +259,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     }
   }, [micEnabled, camEnabled, localStream, phase]);
 
-  // --- CHAT/TASK SYNC & FLOATING MESSAGES (Aesthetic Update) ---
+  // --- CHAT & TASK SYNC ---
   const { messages: chatMessages, sendMessage } = useChat(sessionReady ? sessionId : '', user.id, user.name);
   
   useEffect(() => {
@@ -251,14 +267,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
         const lastMsg = chatMessages[chatMessages.length - 1];
         if (lastMsg.senderId !== 'me' && !isChatOpen) {
             setUnreadChatCount(prev => prev + 1);
-            
             const id = Date.now().toString();
-            // Store simple object
             setFloatingMessages(prev => [...prev, { id, text: lastMsg.text, sender: partner.name }]);
-            
-            setTimeout(() => {
-                setFloatingMessages(prev => prev.filter(m => m.id !== id));
-            }, 6000); // 6s duration
+            setTimeout(() => setFloatingMessages(prev => prev.filter(m => m.id !== id)), 6000);
         }
     }
     if (isChatOpen) setUnreadChatCount(0);
@@ -270,6 +281,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     const unsub = onSnapshot(q, snap => setPartnerTasks(snap.docs.map(d => ({ ...d.data(), id: d.id } as TodoItem))));
     return () => unsub();
   }, [sessionId, user.id]);
+
+  // Derived State: Active Partner Task (HUD)
+  const activePartnerTask = partnerTasks.find(t => !t.completed)?.text;
 
   // --- DRAG ---
   const handleStartDrag = (clientX: number, clientY: number) => {
@@ -283,6 +297,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   useEffect(() => {
       const handleMove = (clientX: number, clientY: number) => {
           if (!isDragging) return;
+          // Use requestAnimationFrame for smoother dragging if needed, but direct updates are fine for simple absolute pos
           setSelfPos({ x: clientX - dragStart.current.x, y: clientY - dragStart.current.y });
       };
       const handleMouseUp = () => setIsDragging(false);
@@ -328,47 +343,40 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   };
 
   const handleExitClick = () => {
-    if (phase === SessionPhase.FOCUS) {
-        setExitModalStep(1); 
-    } else {
-        if (confirm("Exit session?")) finishSession(true);
-    }
+    if (phase === SessionPhase.FOCUS) setExitModalStep(1); 
+    else if (confirm("Exit session?")) finishSession(true);
   };
 
   const confirmExitWithStrike = async () => {
       try {
-          await updateDoc(doc(db, 'users', user.id), {
-              strikes: increment(1),
-              lastStrikeAt: Date.now()
-          });
-      } catch (e) {
-          console.error("Error applying strike:", e);
-      }
+          await updateDoc(doc(db, 'users', user.id), { strikes: increment(1), lastStrikeAt: Date.now() });
+      } catch (e) { console.error(e); }
       finishSession(true);
   };
 
-  const getPhaseColor = () => {
-      if (phase === SessionPhase.ICEBREAKER) return 'from-cyan-500/20 via-blue-500/10 to-transparent';
-      if (phase === SessionPhase.FOCUS) return 'from-purple-900/30 via-indigo-900/20 to-black'; 
-      return 'from-orange-500/20 via-amber-500/10 to-transparent';
+  const getAuraClass = () => {
+      if (!aura) return 'border-white/5'; // Default border
+      if (aura === 'fire') return 'border-orange-500/60 shadow-[0_0_50px_rgba(249,115,22,0.4)]';
+      if (aura === 'power') return 'border-emerald-500/60 shadow-[0_0_50px_rgba(16,185,129,0.4)]';
+      return 'border-blue-400/60 shadow-[0_0_50px_rgba(96,165,250,0.4)]';
   };
 
   return (
-    <div className="absolute inset-0 bg-black overflow-hidden select-none">
+    <div className="absolute inset-0 bg-black overflow-hidden select-none font-sans">
       
       <style>{`
-        @keyframes aestheticFloat {
-          0% { transform: translateY(0) scale(0.8); opacity: 0; }
-          10% { transform: translateY(-20px) scale(1.1); opacity: 1; }
-          100% { transform: translateY(-150px) scale(1); opacity: 0; }
+        @keyframes ripple-effect {
+          0% { transform: scale(0); opacity: 0.8; }
+          100% { transform: scale(4); opacity: 0; }
         }
-        
-        /* NEW: Soft Bottom-Up Float for Messages */
         @keyframes messageFloatUp {
           0% { transform: translateY(20px) scale(0.95); opacity: 0; }
           10% { transform: translateY(0) scale(1); opacity: 1; }
           90% { transform: translateY(-10px) scale(1); opacity: 1; }
           100% { transform: translateY(-20px) scale(0.95); opacity: 0; }
+        }
+        .vignette {
+            background: radial-gradient(circle, transparent 40%, rgba(0,0,0,0.9) 100%);
         }
       `}</style>
       
@@ -378,9 +386,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           </div>
       )}
 
-      <div className={`absolute inset-0 bg-gradient-to-b ${getPhaseColor()} transition-colors duration-[2000ms] pointer-events-none z-0`}></div>
-
-      <div className={`absolute inset-0 z-10 transition-all duration-1000 ease-in-out ${phase === SessionPhase.FOCUS ? 'scale-95 rounded-3xl overflow-hidden shadow-2xl border border-white/5' : ''}`}>
+      {/* --- PARTNER VIDEO CONTAINER --- */}
+      <div 
+        className={`absolute inset-0 z-10 transition-all duration-[1500ms] ease-in-out border-4 ${getAuraClass()} ${phase === SessionPhase.FOCUS ? 'scale-[0.98] rounded-2xl overflow-hidden' : ''}`}
+        onClick={handlePartnerClick} // Clicking video creates ripple
+      >
           {remoteStream ? (
               <video 
                 ref={partnerVideoRef} 
@@ -390,53 +400,65 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                 className="w-full h-full object-cover" 
               />
           ) : (
-              <div className="flex flex-col items-center justify-center h-full gap-4">
+              <div className="flex flex-col items-center justify-center h-full gap-4 bg-slate-900/50">
                   <div className="relative">
                       <div className="absolute inset-0 bg-blue-500 blur-xl opacity-20 animate-pulse"></div>
                       <UserIcon size={64} className="text-slate-700 relative z-10" />
                   </div>
-                  <span className="text-slate-500 font-medium animate-pulse">Establishing link...</span>
+                  <span className="text-slate-500 font-medium animate-pulse">Syncing...</span>
               </div>
           )}
-          <div className={`absolute inset-0 bg-black/40 transition-opacity duration-1000 pointer-events-none ${phase === SessionPhase.FOCUS ? 'opacity-60 backdrop-grayscale-[30%]' : 'opacity-0'}`}></div>
-      </div>
 
-      <div className="absolute inset-0 pointer-events-none overflow-hidden z-20">
-          {floatingEmojis.map(e => (
-              <div 
-                key={e.id} 
-                className="absolute bottom-28 md:bottom-32 text-5xl pointer-events-none select-none drop-shadow-[0_4px_8px_rgba(0,0,0,0.5)]"
-                style={{ 
-                    left: `${e.left}%`,
-                    animation: 'aestheticFloat 2.5s ease-out forwards',
-                    transform: `rotate(${e.rotation}deg)` 
-                }}
-              >
-                  {e.emoji}
+          {/* Ripples Layer */}
+          <div className="absolute inset-0 pointer-events-none overflow-hidden">
+              {ripples.map(r => (
+                  <div 
+                    key={r.id}
+                    className="absolute border border-white/50 rounded-full bg-white/10"
+                    style={{
+                        left: r.x,
+                        top: r.y,
+                        width: '50px',
+                        height: '50px',
+                        marginLeft: '-25px',
+                        marginTop: '-25px',
+                        animation: 'ripple-effect 1s ease-out forwards'
+                    }}
+                  />
+              ))}
+          </div>
+
+          {/* Partner Task HUD (Dynamic Island) */}
+          {activePartnerTask && showUI && (
+              <div className="absolute bottom-8 left-0 right-0 flex justify-center pointer-events-none animate-in fade-in slide-in-from-bottom-2">
+                   <div className="bg-black/60 backdrop-blur-md border border-white/10 px-4 py-2 rounded-full flex items-center gap-2 max-w-[80%] shadow-2xl">
+                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        <span className="text-xs text-slate-300 font-medium truncate">{partner.name} is working on: <span className="text-white">{activePartnerTask}</span></span>
+                   </div>
               </div>
-          ))}
+          )}
       </div>
 
-      {/* NEW: AESTHETIC BOTTOM-UP FLOATING MESSAGES */}
-      <div className="absolute bottom-24 md:bottom-28 left-0 right-0 z-30 flex flex-col items-center gap-2 pointer-events-none">
+      {/* --- FOCUS VIGNETTE OVERLAY --- */}
+      <div className={`absolute inset-0 z-20 pointer-events-none transition-opacity duration-[2000ms] ${phase === SessionPhase.FOCUS ? 'opacity-100 vignette' : 'opacity-0'}`} />
+
+      {/* --- FLOATING CHAT MESSAGES --- */}
+      <div className="absolute bottom-32 left-0 right-0 z-30 flex flex-col items-center gap-2 pointer-events-none">
           {floatingMessages.map(msg => (
-              <div 
-                key={msg.id}
-                className="bg-black/60 backdrop-blur-md border border-white/10 px-4 py-2 rounded-full shadow-xl flex items-center gap-2 animate-[messageFloatUp_5s_ease-out_forwards]"
-              >
-                  <div className="w-5 h-5 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-[10px] font-bold text-white uppercase">
-                      {msg.sender.substring(0,1)}
-                  </div>
+              <div key={msg.id} className="bg-black/60 backdrop-blur-md border border-white/10 px-4 py-2 rounded-full shadow-xl flex items-center gap-2 animate-[messageFloatUp_5s_ease-out_forwards]">
+                  <div className="w-5 h-5 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-[10px] font-bold text-white uppercase">{msg.sender.substring(0,1)}</div>
                   <span className="text-slate-200 text-sm font-medium">{msg.text}</span>
               </div>
           ))}
       </div>
 
+      {/* --- SELF VIDEO (DRAGGABLE) --- */}
       <div 
         onMouseDown={handleMouseDown}
         onTouchStart={handleTouchStart}
-        style={{ transform: `translate(${selfPos.x}px, ${selfPos.y}px)` }}
-        className={`absolute top-0 left-0 w-28 md:w-48 aspect-[3/4] bg-slate-900 rounded-2xl overflow-hidden shadow-2xl border border-white/10 z-30 cursor-grab active:cursor-grabbing transition-opacity duration-500 ${showUI ? 'opacity-100' : 'opacity-30 hover:opacity-100'}`}
+        // GPU Acceleration for smooth drag
+        style={{ transform: `translate3d(${selfPos.x}px, ${selfPos.y}px, 0)` }}
+        className={`absolute top-0 left-0 w-28 md:w-44 aspect-[3/4] bg-slate-900 rounded-2xl overflow-hidden shadow-2xl border border-white/10 z-30 cursor-grab active:cursor-grabbing transition-opacity duration-500 ${showUI ? 'opacity-100' : 'opacity-30 hover:opacity-100'}`}
       >
           <video ref={myVideoRef} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]" />
           <div className="absolute bottom-2 left-2 right-2 flex justify-between items-center">
@@ -445,42 +467,44 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           </div>
       </div>
 
+      {/* --- MAIN UI LAYER --- */}
       <div className={`absolute inset-0 pointer-events-none z-40 transition-opacity duration-500 ${showUI ? 'opacity-100' : 'opacity-0'}`}>
         
+        {/* TOP BAR: TIMER & PHASE */}
         <div className="absolute top-4 md:top-6 left-0 right-0 flex justify-center pointer-events-none px-14 md:px-0">
-            <div className={`backdrop-blur-md border rounded-full px-4 md:px-6 py-2 flex items-center gap-2 md:gap-4 shadow-xl transition-all duration-500 ${phase === SessionPhase.FOCUS ? 'bg-black/60 border-red-500/30' : 'bg-slate-900/80 border-slate-700'}`}>
-                <span className={`text-[10px] md:text-xs font-bold uppercase tracking-wider ${phase === SessionPhase.FOCUS ? 'text-red-400' : 'text-slate-400'}`}>{phase}</span>
-                <div className="w-px h-3 md:h-4 bg-white/10"></div>
-                <span className="font-mono text-lg md:text-xl text-white font-variant-numeric tabular-nums">
+            <div className={`backdrop-blur-xl border rounded-full px-5 py-2 flex items-center gap-3 shadow-2xl transition-all duration-700 ${phase === SessionPhase.FOCUS ? 'bg-black/80 border-red-500/20 text-red-50' : 'bg-slate-900/80 border-slate-700'}`}>
+                <span className={`text-[10px] font-bold uppercase tracking-widest ${phase === SessionPhase.FOCUS ? 'text-red-400' : 'text-slate-400'}`}>{phase}</span>
+                <div className="w-px h-3 bg-white/10"></div>
+                <span className="font-mono text-lg font-variant-numeric tabular-nums text-white">
                     {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
                 </span>
             </div>
         </div>
 
+        {/* TOP BUTTONS */}
         <div className="absolute top-4 md:top-6 left-4 md:left-6 pointer-events-auto">
             <button 
                 onClick={() => setIsReportOpen(true)} 
                 onMouseEnter={() => setIsInteracting(true)}
                 onMouseLeave={() => setIsInteracting(false)}
-                className="p-2.5 md:p-3 rounded-full bg-slate-900/40 text-slate-400 hover:text-red-400 hover:bg-slate-900 border border-slate-700/50 backdrop-blur-md transition-all hover:scale-105"
-                title="Report User"
+                className="p-3 rounded-full bg-black/40 text-slate-400 hover:text-white border border-white/5 hover:bg-slate-800 transition-all"
             >
                 <Flag size={16} />
             </button>
         </div>
-
         <div className="absolute top-4 md:top-6 right-4 md:right-6 pointer-events-auto">
             <Button 
                 variant="danger" 
                 onClick={handleExitClick} 
                 onMouseEnter={() => setIsInteracting(true)}
                 onMouseLeave={() => setIsInteracting(false)}
-                className="py-2 px-3 text-xs bg-red-500/20 hover:bg-red-500/30 border-red-500/50 backdrop-blur-md"
+                className="py-2 px-3 text-xs bg-red-500/10 hover:bg-red-500/20 border-red-500/30 text-red-400 backdrop-blur-md"
             >
                 <LogOut size={14} className="mr-2"/> <span className="hidden md:inline">Exit</span>
             </Button>
         </div>
 
+        {/* CHAT & TASKS MODALS */}
         <div 
             className="pointer-events-auto"
             onMouseEnter={() => setIsInteracting(true)}
@@ -491,52 +515,57 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
              <TaskBoard isOpen={isTaskBoardOpen} onClose={() => setIsTaskBoardOpen(false)} myTasks={myTasks} partnerTasks={partnerTasks} onAddTask={handleAddTask} onToggleTask={handleToggleTask} onDeleteTask={handleDeleteTask} isRevealed={phase !== SessionPhase.FOCUS} canEdit={phase === SessionPhase.ICEBREAKER} partnerName={partner.name} />
         </div>
 
-        <div className="absolute bottom-6 md:bottom-8 left-0 right-0 px-4 flex flex-col md:flex-row items-center justify-center gap-3 md:gap-4 pointer-events-auto">
+        {/* BOTTOM CONTROLS */}
+        <div className="absolute bottom-8 left-0 right-0 px-4 flex flex-col md:flex-row items-center justify-center gap-4 pointer-events-auto">
              
-             <div className="bg-slate-900/80 backdrop-blur-xl border border-white/10 rounded-full px-4 py-1.5 md:py-2 flex items-center gap-3 shadow-2xl order-1 md:order-none mb-1 md:mb-0">
-                 <button onClick={() => handleReaction('🔥')} className="hover:bg-orange-500/20 hover:scale-110 active:scale-95 transition-all p-1.5 md:p-2 rounded-full text-xl md:text-2xl">🔥</button>
-                 <button onClick={() => handleReaction('💯')} className="hover:bg-red-500/20 hover:scale-110 active:scale-95 transition-all p-1.5 md:p-2 rounded-full text-xl md:text-2xl">💯</button>
-                 <button onClick={() => handleReaction('👋')} className="hover:bg-blue-500/20 hover:scale-110 active:scale-95 transition-all p-1.5 md:p-2 rounded-full text-xl md:text-2xl">👋</button>
+             {/* Reaction Buttons (Now trigger Aura) */}
+             <div className="bg-black/60 backdrop-blur-xl border border-white/10 rounded-full px-4 py-2 flex items-center gap-4 shadow-2xl order-1 md:order-none">
+                 <button onClick={() => handleReaction('🔥')} className="hover:scale-110 active:scale-95 transition-all text-xl grayscale hover:grayscale-0 opacity-80 hover:opacity-100" title="Send Motivation">🔥</button>
+                 <button onClick={() => handleReaction('💯')} className="hover:scale-110 active:scale-95 transition-all text-xl grayscale hover:grayscale-0 opacity-80 hover:opacity-100" title="Respect">💯</button>
+                 <button onClick={() => handleReaction('👋')} className="hover:scale-110 active:scale-95 transition-all text-xl grayscale hover:grayscale-0 opacity-80 hover:opacity-100" title="Wave">👋</button>
              </div>
 
-             <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700 rounded-full p-2 flex items-center gap-2 shadow-2xl order-2 md:order-none">
+             {/* Main Controls */}
+             <div className="bg-black/80 backdrop-blur-md border border-white/10 rounded-full p-2 flex items-center gap-2 shadow-2xl order-2 md:order-none">
                 {phase === SessionPhase.ICEBREAKER && (
-                    <Button onClick={async () => { setIsLoadingIcebreaker(true); setIcebreaker(await generateIcebreaker(partner.type)); setIsLoadingIcebreaker(false); }} variant="ghost" className="rounded-full w-10 h-10 p-0 text-yellow-400 hover:bg-yellow-400/10" title="Icebreaker">
-                        <Sparkles size={20} className={isLoadingIcebreaker ? 'animate-spin' : ''}/>
+                    <Button onClick={async () => { setIsLoadingIcebreaker(true); setIcebreaker(await generateIcebreaker(partner.type)); setIsLoadingIcebreaker(false); }} variant="ghost" className="rounded-full w-10 h-10 p-0 text-yellow-400 hover:bg-yellow-400/10">
+                        <Sparkles size={18} className={isLoadingIcebreaker ? 'animate-spin' : ''}/>
                     </Button>
                 )}
 
-                <button onClick={() => { if(phase !== SessionPhase.FOCUS) { setMicEnabled(!micEnabled); setManualMicToggle(!micEnabled); }}} disabled={phase === SessionPhase.FOCUS} className={`w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center transition-all ${phase === SessionPhase.FOCUS ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : micEnabled ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-red-500/20 text-red-500 hover:bg-red-500/30'}`}>
+                <button onClick={() => { if(phase !== SessionPhase.FOCUS) { setMicEnabled(!micEnabled); setManualMicToggle(!micEnabled); }}} disabled={phase === SessionPhase.FOCUS} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${phase === SessionPhase.FOCUS ? 'opacity-30 cursor-not-allowed' : micEnabled ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-red-500/20 text-red-400'}`}>
                     {micEnabled && phase !== SessionPhase.FOCUS ? <Mic size={18} /> : <MicOff size={18} />}
                 </button>
 
-                <button onClick={() => setCamEnabled(!camEnabled)} className={`w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center transition-all ${camEnabled ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-red-500/20 text-red-500 hover:bg-red-500/30'}`}>
+                <button onClick={() => setCamEnabled(!camEnabled)} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${camEnabled ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-red-500/20 text-red-400'}`}>
                     {camEnabled ? <Video size={18} /> : <VideoOff size={18} />}
                 </button>
 
-                <div className="w-px h-6 md:h-8 bg-slate-700 mx-1"></div>
+                <div className="w-px h-6 bg-white/10 mx-1"></div>
 
-                <button onClick={() => { setIsChatOpen(!isChatOpen); setUnreadChatCount(0); }} className="w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 relative">
+                <button onClick={() => { setIsChatOpen(!isChatOpen); setUnreadChatCount(0); }} className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10 text-slate-300 hover:text-white relative transition-colors">
                     <MessageSquare size={18} />
-                    {unreadChatCount > 0 && <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-slate-900"></span>}
+                    {unreadChatCount > 0 && <span className="absolute top-2 right-2 w-2 h-2 bg-blue-500 rounded-full ring-2 ring-black"></span>}
                 </button>
 
-                <button onClick={() => setIsTaskBoardOpen(!isTaskBoardOpen)} className={`w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center transition-colors ${isTaskBoardOpen ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'}`}>
+                <button onClick={() => setIsTaskBoardOpen(!isTaskBoardOpen)} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${isTaskBoardOpen ? 'bg-emerald-500 text-white' : 'hover:bg-white/10 text-slate-300 hover:text-white'}`}>
                     <ListChecks size={18} />
                 </button>
              </div>
         </div>
 
+        {/* Icebreaker Pop-up */}
         {icebreaker && (
-            <div className="absolute bottom-32 left-1/2 -translate-x-1/2 bg-slate-900/95 border border-yellow-500/30 text-yellow-100 px-6 py-4 rounded-2xl shadow-2xl max-w-md text-center pointer-events-auto animate-in slide-in-from-bottom-4 w-[90%] md:w-auto">
-                <p className="text-sm font-medium">✨ {icebreaker}</p>
-                <button onClick={() => setIcebreaker(null)} className="absolute -top-2 -right-2 bg-slate-800 rounded-full p-1 border border-slate-700 hover:bg-slate-700"><LogOut size={12}/></button>
+            <div className="absolute bottom-32 left-1/2 -translate-x-1/2 bg-slate-900/95 border border-yellow-500/30 text-yellow-100 px-6 py-4 rounded-2xl shadow-2xl max-w-md text-center pointer-events-auto animate-in slide-in-from-bottom-4 w-[90%] md:w-auto z-50">
+                <p className="text-sm font-medium leading-relaxed">✨ {icebreaker}</p>
+                <button onClick={() => setIcebreaker(null)} className="absolute -top-2 -right-2 bg-slate-800 rounded-full p-1 border border-slate-700 hover:bg-slate-700"><X size={12}/></button>
             </div>
         )}
 
+        {/* --- MODALS (Report / Exit) --- */}
         {(isReportOpen || exitModalStep > 0) && (
             <div 
-                className="absolute inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in"
+                className="absolute inset-0 z-[60] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in"
                 onMouseEnter={() => setIsInteracting(true)}
                 onMouseLeave={() => setIsInteracting(false)}
             >
@@ -550,7 +579,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                         </div>
                         <div className="space-y-2">
                             <label className="text-xs text-slate-400 uppercase font-bold">Reason</label>
-                            <select value={reportReason} onChange={(e) => setReportReason(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm text-white">
+                            <select value={reportReason} onChange={(e) => setReportReason(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm text-white focus:ring-1 focus:ring-blue-500 outline-none">
                                 <option>Inappropriate Behavior</option>
                                 <option>Abusive Language</option>
                                 <option>Spam / Commercial</option>
@@ -560,7 +589,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                         </div>
                         <div className="space-y-2">
                             <label className="text-xs text-slate-400 uppercase font-bold">Details</label>
-                            <textarea value={reportDetails} onChange={(e) => setReportDetails(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm text-white min-h-[80px] resize-none" />
+                            <textarea value={reportDetails} onChange={(e) => setReportDetails(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm text-white min-h-[80px] resize-none focus:ring-1 focus:ring-blue-500 outline-none" />
                         </div>
                         <div className="flex gap-2 pt-2">
                             <Button variant="secondary" onClick={() => setIsReportOpen(false)} className="flex-1">Cancel</Button>

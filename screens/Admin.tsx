@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../utils/firebaseConfig';
-import { collection, query, orderBy, getDocs, updateDoc, doc, limit, where, startAfter, DocumentData, QueryDocumentSnapshot, writeBatch, deleteDoc, addDoc, getDoc } from 'firebase/firestore';
-import { Report, SessionLog, ChatMessage, User } from '../types';
+import { collection, query, orderBy, getDocs, updateDoc, doc, limit, where, DocumentData, QueryDocumentSnapshot, writeBatch, deleteDoc, addDoc, getDoc } from 'firebase/firestore';
+import { SessionLog, ChatMessage, User } from '../types';
 import { Button } from '../components/Button';
-import { Shield, AlertTriangle, UserX, UserCheck, History, XCircle, CheckCircle, ArrowLeft, X, FileText, Download, Users, Radio, Activity, Zap, Search, ChevronDown, ArrowRight, RefreshCw, Copy, Trash2, Server, MessageSquarePlus, Send, AlertOctagon, Eye, EyeOff, RotateCcw } from 'lucide-react';
+import { Shield, AlertTriangle, UserX, UserCheck, History, X, FileText, Download, Users, Radio, Zap, Search, RefreshCw, RotateCcw, MessageSquarePlus, Send, AlertOctagon, Eye, EyeOff, Server, ArrowLeft, Trash2 } from 'lucide-react';
 
 interface AdminProps {
     onBack: () => void;
@@ -30,7 +30,6 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
     // Pagination
     const [lastUserDoc, setLastUserDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
     const [lastSessionDoc, setLastSessionDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
-    const [loadingMore, setLoadingMore] = useState(false);
 
     // Modal State
     const [modal, setModal] = useState<{
@@ -66,7 +65,6 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                 const mappedSessions = snap.docs.map((d) => {
                     const data = d.data();
                     
-                    // User Info Logic
                     let u1Name = 'Unknown';
                     let u2Name = 'Unknown';
                     
@@ -80,43 +78,45 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
 
                     // --- ZOMBIE SESSION FIX START ---
                     const startMs = data.createdAt?.toMillis() || Date.now();
-                    const configDuration = data.config?.duration || 30; // Default 30 mins
                     
-                    // We consider a session "Zombie" (crashed) if it is 'active' 
-                    // but the time passed is Config Duration + 20 Minutes Buffer.
-                    const maxReasonableTime = startMs + (configDuration * 60000) + (20 * 60000);
+                    // 1. Get Duration (Default 30m)
+                    const configDuration = data.config?.duration || 30; 
+                    
+                    // 2. Dynamic Buffer: If Test Mode (< 5 mins), wait only 3 mins. Otherwise wait 15 mins.
+                    const zombieBufferMins = configDuration < 5 ? 3 : 15;
+                    
+                    // 3. Calculate "Death Time"
+                    const maxReasonableTime = startMs + (configDuration * 60000) + (zombieBufferMins * 60000);
+                    
+                    // 4. Check if Zombie (Active status BUT past the reasonable time)
                     const isZombie = data.status === 'active' && Date.now() > maxReasonableTime;
 
                     let endMs = data.endedAt?.toMillis();
 
-                    // If no official end time...
                     if (!endMs) {
                         if (data.status === 'active' && !isZombie) {
-                            // Truly LIVE: Use current time to show progress
+                            // Truly LIVE
                             endMs = Date.now();
                         } else {
-                            // Zombie or Aborted: Use the last time the DB was updated (or start time if missing)
-                            // This stops the timer from growing forever.
+                            // Zombie or Aborted or Timed Out -> Stop timer at update or start
                             endMs = data.updatedAt?.toMillis() || startMs;
                         }
                     }
 
-                    // Calculate Duration
                     let finalDuration = 0;
                     if (endMs && startMs) {
                         finalDuration = Math.max(0, Math.floor((endMs - startMs) / 60000));
                     }
                     
-                    // Fallback logic for Completed sessions
+                    // Fallback for clean completions
                     if (finalDuration === 0 && data.status === 'completed') {
                          finalDuration = configDuration;
                     }
 
-                    // Determine Label
                     let outcomeLabel = 'ABORTED';
                     if (data.status === 'completed') outcomeLabel = 'COMPLETED';
                     else if (data.status === 'active' && !isZombie) outcomeLabel = 'LIVE';
-                    else if (isZombie) outcomeLabel = 'TIMED OUT'; // Distinguish zombies
+                    else if (isZombie) outcomeLabel = 'TIMED OUT'; // "Zombie" detected
                     else if (finalDuration > 0) outcomeLabel = 'PARTIAL';
                     // --- ZOMBIE SESSION FIX END ---
 

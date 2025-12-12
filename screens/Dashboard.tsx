@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Button } from '../components/Button';
 import { SessionType, SessionDuration, SessionConfig, SessionMode, User } from '../types';
 import { Briefcase, BookOpen, Code, Clock, Coffee, Play, FlaskConical } from 'lucide-react';
+// NEW IMPORT
+import { LiveRequests } from '../components/LiveRequests';
 
 interface DashboardProps {
   user: User;
@@ -37,10 +39,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogo
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-4 max-w-5xl mx-auto w-full overflow-y-auto">
+    <div className="flex-1 flex flex-col items-center justify-start p-4 max-w-5xl mx-auto w-full overflow-y-auto">
       
       {/* Header */}
-      <div className="w-full mb-6 text-center md:text-left">
+      <div className="w-full mb-6 text-center md:text-left mt-4">
         <h1 className="text-3xl font-bold mb-2">Configure Session</h1>
         <p className="text-slate-400">Choose your focus area and time block to find a match.</p>
       </div>
@@ -117,7 +119,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogo
         </div>
       </div>
 
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-md mb-10">
         <Button 
           onClick={handleStart}
           className="w-full py-4 text-lg shadow-blue-500/25 shadow-xl"
@@ -126,6 +128,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogo
           Find Partner
         </Button>
       </div>
+
+      {/* --- NEW SECTION: LIVE REQUESTS LOBBY --- */}
+      <div className="w-full border-t border-white/5 pt-8 pb-8">
+         <LiveRequests 
+            currentUser={user} 
+            // When joining, we just trigger the normal match logic with their config.
+            // This puts us in the queue with the exact settings they are waiting for.
+            onJoinSession={(partnerId, config) => onStartMatch(config)} 
+         />
+      </div>
+
     </div>
   );
 };

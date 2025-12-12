@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '../components/Button';
 import { SessionType, SessionDuration, SessionConfig, SessionMode, User } from '../types';
-import { Briefcase, BookOpen, Code, Clock, Coffee, Play, FlaskConical } from 'lucide-react';
-// NEW IMPORT
+import { Briefcase, BookOpen, Code, Clock, Coffee, Play, FlaskConical, LogOut, ArrowDown } from 'lucide-react';
 import { LiveRequests } from '../components/LiveRequests';
+import { db } from '../utils/firebaseConfig';
+import { collection, onSnapshot } from 'firebase/firestore';
 
 interface DashboardProps {
   user: User;
@@ -14,6 +15,25 @@ interface DashboardProps {
 export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogout }) => {
   const [selectedType, setSelectedType] = useState<SessionType>(SessionType.STUDY);
   const [selectedDuration, setSelectedDuration] = useState<SessionDuration>(SessionDuration.MIN_30);
+  
+  // 1. TRACK LOBBY COUNT
+  const [lobbyCount, setLobbyCount] = useState(0);
+
+  // 2. LISTEN TO DATABASE
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'waiting_room'), (snap) => {
+        // Count everyone except myself
+        const count = snap.docs.filter(d => d.data().userId !== user.id).length;
+        setLobbyCount(count);
+    });
+    return () => unsub();
+  }, [user.id]);
+
+  // 3. SCROLL HELPER
+  const scrollToLobby = () => {
+      const element = document.getElementById('live-lobby-section');
+      if (element) element.scrollIntoView({ behavior: 'smooth' });
+  };
 
   const categories = [
     { type: SessionType.STUDY, icon: BookOpen, desc: 'Academic focus' },
@@ -39,10 +59,42 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogo
   };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-start p-4 max-w-5xl mx-auto w-full overflow-y-auto">
+    <div className="flex-1 flex flex-col items-center justify-start p-4 max-w-5xl mx-auto w-full overflow-y-auto relative">
       
+      {/* Logout Button */}
+      <div className="absolute top-0 right-0 p-4 z-20">
+        <Button 
+            variant="ghost" 
+            onClick={onLogout} 
+            className="text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+        >
+            <LogOut size={18} className="mr-2"/> Logout
+        </Button>
+      </div>
+
+      {/* --- NEW: DYNAMIC LOBBY NOTIFICATION --- */}
+      {lobbyCount > 0 && (
+          <div 
+            onClick={scrollToLobby}
+            className="w-full max-w-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 p-3 rounded-xl mb-4 flex items-center justify-between cursor-pointer hover:bg-emerald-500/20 transition-all animate-in slide-in-from-top-4 mt-8"
+          >
+              <div className="flex items-center gap-3">
+                  <span className="relative flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                  </span>
+                  <span className="font-bold text-sm">
+                      {lobbyCount} {lobbyCount === 1 ? 'Person' : 'People'} waiting in Lobby
+                  </span>
+              </div>
+              <div className="flex items-center gap-1 text-xs font-bold uppercase tracking-wider">
+                  View <ArrowDown size={14} />
+              </div>
+          </div>
+      )}
+
       {/* Header */}
-      <div className="w-full mb-6 text-center md:text-left mt-4">
+      <div className={`w-full mb-6 text-center md:text-left ${lobbyCount > 0 ? '' : 'pt-8'}`}>
         <h1 className="text-3xl font-bold mb-2">Configure Session</h1>
         <p className="text-slate-400">Choose your focus area and time block to find a match.</p>
       </div>
@@ -98,7 +150,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogo
               </button>
             ))}
 
-            {/* Test Mode Button - Visible to ADMIN and DEV */}
+            {/* Test Mode Button */}
             {(user.role === 'admin' || user.role === 'dev') && (
                <button
                   onClick={() => setSelectedDuration(SessionDuration.TEST)}
@@ -129,12 +181,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogo
         </Button>
       </div>
 
-      {/* --- NEW SECTION: LIVE REQUESTS LOBBY --- */}
-      <div className="w-full border-t border-white/5 pt-8 pb-8">
+      {/* --- LIVE REQUESTS LOBBY (With ID for scrolling) --- */}
+      <div id="live-lobby-section" className="w-full border-t border-white/5 pt-8 pb-8">
          <LiveRequests 
             currentUser={user} 
-            // When joining, we just trigger the normal match logic with their config.
-            // This puts us in the queue with the exact settings they are waiting for.
             onJoinSession={(partnerId, config) => onStartMatch(config)} 
          />
       </div>

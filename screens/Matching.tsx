@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { SessionConfig, Partner, User } from '../types';
-import { Loader2, AlertTriangle, ExternalLink } from 'lucide-react';
+import { Loader2, AlertTriangle, ExternalLink, Radio } from 'lucide-react';
 import { useMatchmaking } from '../hooks/useMatchmaking';
 import { db } from '../utils/firebaseConfig';
 import { doc, onSnapshot, collection, addDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
@@ -17,14 +17,14 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
   const [sessionIdToWatch, setSessionIdToWatch] = useState<string | null>(null);
   const [hasCalledOnMatch, setHasCalledOnMatch] = useState(false);
   
-  // NEW: Ref to track our public lobby document
+  // CHANGED: Use State so the UI actually updates when broadcast happens
+  const [isInLobby, setIsInLobby] = useState(false);
   const lobbyTicketRef = useRef<string | null>(null);
 
   // Use the matchmaking hook
   const { status, joinQueue, cancelSearch, error } = useMatchmaking(user, (partner, sessionId) => {
     console.log('[MATCHING] Received onMatch callback from hook:', partner, sessionId);
     setSessionIdToWatch(sessionId);
-    // Don't call onMatched yet - wait for real-time listener
   });
 
   // Start the queue join on mount
@@ -35,19 +35,19 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
     return () => {
       console.log('[MATCHING] Component unmounting, canceling search');
       cancelSearch();
-      // NEW: Cleanup lobby ticket if it exists
+      // Cleanup lobby ticket if it exists
       if (lobbyTicketRef.current) {
         deleteDoc(doc(db, 'waiting_room', lobbyTicketRef.current)).catch(console.error);
       }
     };
   }, [config, joinQueue, cancelSearch]);
 
-  // --- NEW: LOBBY BROADCAST LOGIC ---
+  // --- LOBBY BROADCAST LOGIC ---
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
 
-    // Only start timer if we are actively searching and haven't found a session yet
-    if (status === 'SEARCHING' && !sessionIdToWatch) {
+    // Only start timer if we are actively searching and NOT in lobby yet
+    if (status === 'SEARCHING' && !sessionIdToWatch && !isInLobby) {
         timeoutId = setTimeout(async () => {
             try {
                 // Double check we are still searching before posting
@@ -62,104 +62,72 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
                     });
                     
                     lobbyTicketRef.current = lobbyRef.id;
-                    setStatusText("Broadcasted to Lobby. Waiting for joiner...");
+                    setIsInLobby(true); // <--- This triggers the UI update
                 }
             } catch (e) {
                 console.error("Lobby broadcast failed", e);
             }
         }, 10000); // 10 Seconds
-    } else {
-        // If status changes (e.g. MATCHED) or session found, remove from lobby
-        if (lobbyTicketRef.current) {
-            deleteDoc(doc(db, 'waiting_room', lobbyTicketRef.current)).catch(console.error);
-            lobbyTicketRef.current = null;
-        }
+    } 
+    // If we match, remove from lobby
+    else if (lobbyTicketRef.current && (sessionIdToWatch || status === 'MATCHED')) {
+        deleteDoc(doc(db, 'waiting_room', lobbyTicketRef.current)).catch(console.error);
+        lobbyTicketRef.current = null;
     }
 
     return () => clearTimeout(timeoutId);
-  }, [status, sessionIdToWatch, user, config]);
+  }, [status, sessionIdToWatch, user, config, isInLobby]);
 
-  // Listen to session document once we have a session ID
+  // Listen to session document
   useEffect(() => {
-    if (!sessionIdToWatch || hasCalledOnMatch) {
-      return;
-    }
+    if (!sessionIdToWatch || hasCalledOnMatch) return;
 
-    console.log('[MATCHING] Watching session:', sessionIdToWatch);
+    const sessionRef = doc(collection(db, 'sessions'), sessionIdToWatch);
 
-    const sessionsColl = collection(db, 'sessions');
-    const sessionRef = doc(sessionsColl, sessionIdToWatch);
+    const unsubscribe = onSnapshot(sessionRef, (snap) => {
+      if (!snap.exists()) return;
+      const sessionData = snap.data() as any;
 
-    const unsubscribe = onSnapshot(
-      sessionRef,
-      (snap) => {
-        if (!snap.exists()) {
-          console.warn('[MATCHING] Session was deleted');
-          return;
+      if (sessionData.started === true && !hasCalledOnMatch) {
+        setHasCalledOnMatch(true);
+        const partnerInfo = sessionData.participantInfo?.find((p: any) => p.userId !== user.id);
+        if (partnerInfo) {
+          onMatched({
+            id: partnerInfo.userId,
+            name: partnerInfo.displayName || 'Partner',
+            type: sessionData.config?.type || 'ANY',
+          }, sessionIdToWatch);
         }
+        return;
+      }
 
-        const sessionData = snap.data() as any;
-
-        console.log('[MATCHING] Session update:', {
-          participants: sessionData.participants?.length || 0,
-          started: sessionData.started
-        });
-
-        // Check if already started
-        if (sessionData.started === true && !hasCalledOnMatch) {
-          console.log('[MATCHING] Session already started, joining immediately');
+      if (Array.isArray(sessionData.participants) && sessionData.participants.length >= 2) {
+        if (!hasCalledOnMatch) {
           setHasCalledOnMatch(true);
-          
-          const participantInfo: any[] = sessionData.participantInfo || [];
-          const partnerInfo = participantInfo.find((p: any) => p.userId !== user.id);
-
+          const partnerInfo = sessionData.participantInfo?.find((p: any) => p.userId !== user.id);
           if (partnerInfo) {
-            const partner: Partner = {
+            onMatched({
               id: partnerInfo.userId,
               name: partnerInfo.displayName || 'Partner',
               type: sessionData.config?.type || 'ANY',
-            };
-
-            onMatched(partner, sessionIdToWatch);
-          }
-          return;
-        }
-
-        // Wait for session to have 2 participants
-        if (Array.isArray(sessionData.participants) && sessionData.participants.length >= 2) {
-          console.log('[MATCHING] Session has 2 participants, proceeding to negotiation');
-          
-          if (!hasCalledOnMatch) {
-            setHasCalledOnMatch(true);
-            
-            const participantInfo: any[] = sessionData.participantInfo || [];
-            const partnerInfo = participantInfo.find((p: any) => p.userId !== user.id);
-
-            if (partnerInfo) {
-              const partner: Partner = {
-                id: partnerInfo.userId,
-                name: partnerInfo.displayName || 'Partner',
-                type: sessionData.config?.type || 'ANY',
-              };
-
-              onMatched(partner, sessionIdToWatch);
-            }
+            }, sessionIdToWatch);
           }
         }
-      },
-      (error) => {
-        console.error('[MATCHING] Session listener error:', error);
       }
-    );
+    });
 
-    return () => {
-      unsubscribe();
-    };
+    return () => unsubscribe();
   }, [sessionIdToWatch, user.id, onMatched, hasCalledOnMatch]);
 
-  // Update status text (Only if we haven't broadcasted to lobby yet)
+  // Update status text
   useEffect(() => {
-    if (status === 'SEARCHING' && !lobbyTicketRef.current) {
+    // STOP rotating text if we are in the lobby
+    if (isInLobby) {
+        setStatusText("Visible in Public Lobby. Waiting for someone to join you...");
+        return;
+    }
+
+    if (status === 'SEARCHING') {
       const msgs = [
         `Looking for ${config.type} sessions...`,
         `Finding ${config.duration}m duration partner...`,
@@ -175,15 +143,20 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
     } else if (status === 'MATCHED') {
       setStatusText("Match Found! Connecting...");
     }
-  }, [status, config]);
+  }, [status, config, isInLobby]);
 
-  // Extract link from Firebase error if present
   const indexLink = error && error.includes('https://console.firebase.google.com') 
     ? error.match(/https:\/\/console\.firebase\.google\.com[^\s]*/)?.[0] 
     : null;
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-8 bg-slate-950">
+    <div className="flex-1 flex flex-col items-center justify-center p-8 bg-slate-950 relative overflow-hidden">
+      
+      {/* Background Pulse Effect */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className={`w-96 h-96 rounded-full animate-ping opacity-20 ${isInLobby ? 'bg-emerald-500/10' : 'bg-blue-500/10'}`}></div>
+      </div>
+
       {error ?  (
         <div className="max-w-md w-full bg-red-500/10 border border-red-500/50 rounded-xl p-6 text-center animate-in fade-in zoom-in">
           <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -191,40 +164,40 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
           </div>
           <h3 className="text-xl font-bold text-white mb-2">Connection Error</h3>
           <p className="text-slate-300 mb-4 text-sm">{error}</p>
-          
           {indexLink && (
-            <a 
-              href={indexLink} 
-              target="_blank" 
-              rel="noreferrer"
-              className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors mb-4"
-            >
+            <a href={indexLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors mb-4">
               <ExternalLink size={16} /> Create Missing Index
             </a>
           )}
-
-          <div>
-            <button 
-              onClick={() => {
-                cancelSearch();
-                onCancel();
-              }}
-              className="text-slate-400 hover:text-white underline"
-            >
-              Go Back
-            </button>
-          </div>
+          <button onClick={() => { cancelSearch(); onCancel(); }} className="text-slate-400 hover:text-white underline">Go Back</button>
         </div>
       ) : (
-        <>
+        <div className="relative z-10 flex flex-col items-center text-center">
           <div className="relative mb-12">
-            <div className="absolute inset-0 bg-blue-500/20 blur-3xl rounded-full animate-pulse"></div>
-            <div className="relative w-32 h-32 rounded-full border-4 border-blue-500/30 flex items-center justify-center">
-              <Loader2 size={64} className="text-blue-500 animate-spin" />
+            <div className={`absolute inset-0 blur-3xl rounded-full animate-pulse ${isInLobby ? 'bg-emerald-500/20' : 'bg-blue-500/20'}`}></div>
+            <div className={`relative w-32 h-32 rounded-full border-4 flex items-center justify-center ${isInLobby ? 'border-emerald-500/30' : 'border-blue-500/30'}`}>
+              {isInLobby ? (
+                  <Radio size={64} className="text-emerald-500 animate-pulse" />
+              ) : (
+                  <Loader2 size={64} className="text-blue-500 animate-spin" />
+              )}
             </div>
           </div>
 
-          <h2 className="text-2xl font-bold text-white mb-4">Finding Your Partner</h2>
+          <h2 className="text-2xl font-bold text-white mb-4">
+              {isInLobby ? "Live in Lobby" : "Finding Your Partner"}
+          </h2>
+          
+          {isInLobby && (
+              <div className="mb-6 bg-emerald-500/10 border border-emerald-500/20 px-4 py-2 rounded-full flex items-center gap-2">
+                  <span className="relative flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                  </span>
+                  <span className="text-emerald-400 text-sm font-medium">Visible to everyone</span>
+              </div>
+          )}
+
           <p className="text-slate-300 mb-8 text-center max-w-sm">{statusText}</p>
 
           <button
@@ -236,7 +209,7 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
           >
             Cancel Search
           </button>
-        </>
+        </div>
       )}
     </div>
   );

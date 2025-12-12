@@ -6,11 +6,7 @@ import { LiveRequests } from '../components/LiveRequests';
 import { db } from '../utils/firebaseConfig';
 import { collection, onSnapshot } from 'firebase/firestore';
 
-interface DashboardProps {
-  user: User;
-  onStartMatch: (config: SessionConfig) => void;
-  onLogout: () => void;
-}
+
 
 export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogout }) => {
   const [selectedType, setSelectedType] = useState<SessionType>(SessionType.STUDY);

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Partner, SessionPhase, User, SessionConfig, SessionDuration, TodoItem } from '../types';
 import { Button } from '../components/Button';
 import { generateIcebreaker } from '../services/geminiService';
-import { Mic, MicOff, Video, VideoOff, Sparkles, LogOut, User as UserIcon, MessageSquare, ListChecks, Flag, X, AlertTriangle, HeartCrack, CheckCircle2 } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, Sparkles, LogOut, User as UserIcon, MessageSquare, ListChecks, Flag, X, AlertTriangle, HeartCrack, CheckCircle2, Gamepad2, Square, Scissors, Wind } from 'lucide-react';
 import { ChatWindow } from '../components/ChatWindow';
 import { TaskBoard } from '../components/TaskBoard';
 import { SessionRecap } from '../components/SessionRecap';
@@ -19,6 +19,16 @@ interface LiveSessionProps {
   onEndSession: () => void;
 }
 
+// --- GAME TYPES ---
+type GameType = 'TICTACTOE' | 'RPS' | 'BREATH' | null;
+interface GameState {
+    type: GameType;
+    board?: (string | null)[]; // For TicTacToe
+    turn?: string; // userId
+    moves?: Record<string, string>; // For RPS { userId: 'ROCK' }
+    winner?: string | 'DRAW' | null;
+}
+
 export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config, sessionId, onEndSession }) => {
   const isTest = config.duration === SessionDuration.TEST;
   
@@ -30,10 +40,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [isReadyForWebRTC, setIsReadyForWebRTC] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
 
-  // Ref to track phase inside Firebase listeners
   const phaseRef = useRef<SessionPhase>(SessionPhase.ICEBREAKER);
-  
-  // ADDED: Track the server-side start time of the current phase
   const phaseStartTimeRef = useRef<number | null>(null);
 
   // --- UI STATE ---
@@ -47,70 +54,49 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [isTaskBoardOpen, setIsTaskBoardOpen] = useState(false);
   const [showUI, setShowUI] = useState(true); 
   
-  // REPLACED: Floating Emojis -> Ripples & Aura
+  // --- GAME STATE ---
+  const [isGameOpen, setIsGameOpen] = useState(false);
+  const [gameState, setGameState] = useState<GameState>({ type: null });
+
   const [ripples, setRipples] = useState<{id: number, x: number, y: number}[]>([]);
   const [aura, setAura] = useState<'neutral' | 'fire' | 'power' | 'wave' | null>(null);
 
-  // Floating Messages State (Chat bubbles)
   const [floatingMessages, setFloatingMessages] = useState<{id: string, text: string, sender: string}[]>([]);
   const [isInteracting, setIsInteracting] = useState(false);
 
-  // EXIT MODAL STATE
   const [exitModalStep, setExitModalStep] = useState<0 | 1 | 2>(0); 
-
-  // Report State
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState('Inappropriate Behavior');
   const [reportDetails, setReportDetails] = useState('');
 
-  // Draggable Self-Video State
   const [selfPos, setSelfPos] = useState({ x: 20, y: 100 }); 
   const [isDragging, setIsDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
 
-  // Anti-Spam Ref
   const lastReactionTime = useRef<number>(0);
 
   const [myTasks, setMyTasks] = useState<TodoItem[]>([]);
   const [partnerTasks, setPartnerTasks] = useState<TodoItem[]>([]);
 
-  // Refs
   const myVideoRef = useRef<HTMLVideoElement>(null);
   const partnerVideoRef = useRef<HTMLVideoElement>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const auraTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastMsgCount = useRef(0); 
 
-  // ---------------------------------------------------------------------------
-  // ADDED: POMODORO LOGIC START
-  // ---------------------------------------------------------------------------
-  
-  // 1. Calculate total expected focus duration to determine cycles
+  // --- POMODORO LOGIC ---
   const calculatedFocusDuration = isTest ? 30 : (config.duration - config.preTalkMinutes - config.postTalkMinutes) * 60;
-  
-  // 2. Check if mode is Pomodoro (handling potentially untyped config from props)
   const isPomodoroMode = (config as any).mode === 'POMODORO' || (config as any).mode === 1;
 
-  // 3. Helper to determine current Pomodoro state based on timeLeft
   const getPomodoroState = () => {
-      // Only apply during FOCUS phase and if enabled
       if (phase !== SessionPhase.FOCUS || !isPomodoroMode || isTest) {
           return { isPomodoroBreak: false, label: 'FOCUS' };
       }
-
-      // Calculate elapsed time in Focus phase
       const elapsed = calculatedFocusDuration - timeLeft;
-      
-      // Standard Pomodoro: 25m Work + 5m Break = 30m (1800s) cycle
       const cycleDuration = 30 * 60; 
       const workDuration = 25 * 60;
-
-      // Determine position in the current cycle
       const cyclePosition = elapsed % cycleDuration;
-      
-      // If we are past the work duration in this cycle, it's a break
       const isBreak = cyclePosition >= workDuration;
-
       return {
           isPomodoroBreak: isBreak,
           label: isBreak ? 'FOCUS • BREAK' : 'FOCUS • WORK'
@@ -120,7 +106,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const { isPomodoroBreak, label: phaseLabel } = getPomodoroState();
   const prevPomodoroBreak = useRef(isPomodoroBreak);
 
-  // 4. Sound Effect Helper (Soft Ding)
   const playSoftDing = () => {
       try {
           const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
@@ -128,52 +113,36 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           const ctx = new AudioContext();
           const osc = ctx.createOscillator();
           const gain = ctx.createGain();
-          
           osc.connect(gain);
           gain.connect(ctx.destination);
-          
           osc.type = 'sine';
-          osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5 (Soft Pitch)
-          
-          // Soft attack and decay
+          osc.frequency.setValueAtTime(523.25, ctx.currentTime);
           gain.gain.setValueAtTime(0, ctx.currentTime);
-          gain.gain.linearRampToValueAtTime(0.1, ctx.currentTime + 0.1); // Low volume (0.1)
-          gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 2); // Slow fade
-          
+          gain.gain.linearRampToValueAtTime(0.1, ctx.currentTime + 0.1);
+          gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 2);
           osc.start();
           osc.stop(ctx.currentTime + 2);
-      } catch (e) {
-          // Fallback or silence
-      }
+      } catch (e) {}
   };
 
-  // 5. Effect: Handle Work/Break Transitions (Audio & Mic)
   useEffect(() => {
       if (phase !== SessionPhase.FOCUS) return;
-
       if (isPomodoroBreak !== prevPomodoroBreak.current) {
-          // Transition detected
           playSoftDing();
-          
           if (isPomodoroBreak) {
-              // Entering Break: Enable Mic
               setMicEnabled(true);
               setManualMicToggle(true);
           } else {
-              // Entering Work: Disable Mic
               setMicEnabled(false);
               setManualMicToggle(false);
+              // FORCE STOP GAME IF WORK STARTS
+              setIsGameOpen(false);
           }
-          
           prevPomodoroBreak.current = isPomodoroBreak;
       }
   }, [isPomodoroBreak, phase]);
 
-  // ---------------------------------------------------------------------------
-  // ADDED: POMODORO LOGIC END
-  // ---------------------------------------------------------------------------
-
-  // --- 1. SETUP & WEBRTC ---
+  // --- SETUP ---
   useEffect(() => {
     if (!sessionId || !user.id || !partner.id) return;
     const amICaller = user.id < partner.id;
@@ -184,7 +153,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
   const { localStream, remoteStream } = useWebRTC(isReadyForWebRTC ? sessionId : '', user.id, isInitiator);
 
-  // --- 2. SYNC & REACTIONS (FIXED TIME SYNC) ---
+  // --- SYNC & REACTIONS ---
   useEffect(() => {
     if (!sessionId) return;
 
@@ -192,7 +161,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
         if (!docSnap.exists()) return;
         const data = docSnap.data();
 
-        // Save server timestamp locally
         if (data.phaseStartTime) {
             phaseStartTimeRef.current = data.phaseStartTime;
         }
@@ -201,10 +169,10 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             setPhase(data.phase as SessionPhase);
             phaseRef.current = data.phase as SessionPhase;
 
-            // Handle Mic State on Phase Change
             if (data.phase === SessionPhase.FOCUS) {
                 setMicEnabled(false); 
                 setManualMicToggle(false); 
+                setIsGameOpen(false); // Force close game on Focus start
             } else if (data.phase === SessionPhase.DEBRIEF) {
                 setMicEnabled(true);
                 setManualMicToggle(true);
@@ -213,28 +181,30 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             }
         }
 
-        // --- FIXED SYNC LOGIC ---
-        // Calculate remaining time based on Server Start Time
+        // --- GAME STATE SYNC ---
+        if (data.gameState) {
+             setGameState(data.gameState);
+             // If partner started a game, open the window for me too
+             if (data.gameState.type && !isGameOpen && phase !== SessionPhase.FOCUS) {
+                 setIsGameOpen(true);
+             }
+        }
+
         if (data.phaseStartTime) {
             const now = Date.now();
             const elapsedSeconds = Math.floor((now - data.phaseStartTime) / 1000);
-            
             let totalDurationForPhase = 0;
             if (data.phase === SessionPhase.ICEBREAKER) totalDurationForPhase = isTest ? 30 : config.preTalkMinutes * 60;
             else if (data.phase === SessionPhase.FOCUS) totalDurationForPhase = isTest ? 30 : (config.duration - config.preTalkMinutes - config.postTalkMinutes) * 60;
             else if (data.phase === SessionPhase.DEBRIEF) totalDurationForPhase = isTest ? 30 : config.postTalkMinutes * 60;
             
             const exactTimeLeft = Math.max(0, totalDurationForPhase - elapsedSeconds);
-            
-            // Only update if difference is significant (drift > 2 seconds) to avoid jitter
-            // OR if we are initializing (timeLeft matches default)
             setTimeLeft(prev => {
                 if (Math.abs(prev - exactTimeLeft) > 2) return exactTimeLeft;
                 return prev;
             });
         }
 
-        // Reactions
         if (data.lastReaction && data.lastReaction.senderId !== user.id) {
             if (Date.now() - data.lastReaction.timestamp < 2000) {
                 triggerAura(data.lastReaction.emoji);
@@ -250,21 +220,79 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, user.id, config, isTest]);
 
-  // --- 3. ZEN MODE / MOUSE HANDLING ---
+  // --- GAME LOGIC ---
+  const updateGame = async (newState: Partial<GameState>) => {
+      await updateDoc(doc(db, 'sessions', sessionId), {
+          gameState: { ...gameState, ...newState }
+      });
+  };
+
+  const initGame = (type: GameType) => {
+      if (type === 'TICTACTOE') {
+          updateGame({ type, board: Array(9).fill(null), turn: isInitiator ? user.id : partner.id, winner: null });
+      } else if (type === 'RPS') {
+          updateGame({ type, moves: {}, winner: null });
+      } else if (type === 'BREATH') {
+          updateGame({ type, winner: null });
+      }
+  };
+
+  const handleTicTacToeMove = (index: number) => {
+      if (!gameState.board || gameState.board[index] || gameState.winner || gameState.turn !== user.id) return;
+      
+      const newBoard = [...gameState.board];
+      newBoard[index] = user.id; // Mark with my ID
+      
+      // Check Winner
+      const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+      let winner = null;
+      for (let i = 0; i < lines.length; i++) {
+          const [a,b,c] = lines[i];
+          if (newBoard[a] && newBoard[a] === newBoard[b] && newBoard[a] === newBoard[c]) {
+              winner = newBoard[a];
+          }
+      }
+      if (!winner && !newBoard.includes(null)) winner = 'DRAW';
+
+      updateGame({ board: newBoard, turn: partner.id, winner });
+  };
+
+  const handleRPSMove = (move: string) => {
+      if (gameState.moves?.[user.id]) return; // Already moved
+      
+      const newMoves = { ...gameState.moves, [user.id]: move };
+      let winner = null;
+      
+      // If both moved, decide winner
+      if (Object.keys(newMoves).length === 2) {
+          const myMove = newMoves[user.id];
+          const theirMove = newMoves[partner.id];
+          
+          if (myMove === theirMove) winner = 'DRAW';
+          else if (
+              (myMove === 'ROCK' && theirMove === 'SCISSORS') ||
+              (myMove === 'PAPER' && theirMove === 'ROCK') ||
+              (myMove === 'SCISSORS' && theirMove === 'PAPER')
+          ) winner = user.id;
+          else winner = partner.id;
+      }
+      
+      updateGame({ moves: newMoves, winner });
+  };
+
+  // --- STANDARD EFFECTS ---
   useEffect(() => {
       const handleMouseMove = () => {
           setShowUI(true);
-          
-          // In focus mode, hide UI faster (2s) to encourage work
           if (phase === SessionPhase.FOCUS) {
               if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-              if (!isInteracting) {
+              if (!isInteracting && !isGameOpen) { // Keep UI open if game is open
                   controlsTimeoutRef.current = setTimeout(() => setShowUI(false), 2000);
               }
           }
       };
 
-      if (isInteracting) {
+      if (isInteracting || isGameOpen) {
           setShowUI(true);
           if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
       } else {
@@ -278,14 +306,10 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           window.removeEventListener('touchstart', handleMouseMove);
           if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
       };
-  }, [phase, isInteracting]); 
+  }, [phase, isInteracting, isGameOpen]); 
 
-  // --- 4. TIMER (With Local Countdown) ---
   useEffect(() => {
     if (phase === SessionPhase.COMPLETED) return;
-    
-    // We still keep local interval for smooth seconds, 
-    // but the onSnapshot above corrects it if it drifts.
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) { handlePhaseTimeout(); return 0; }
@@ -295,35 +319,28 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     return () => clearInterval(timer);
   }, [phase]);
 
-  // --- FIXED: PHASE TRANSITION ---
   const handlePhaseTimeout = async () => {
     let nextPhase: SessionPhase | null = null;
     const currentP = phaseRef.current; 
-    
-    // Double check we haven't already moved (prevent double triggers)
-    // In a real app we might use a transition flag, but checking timeLeft or phase is decent
     
     if (currentP === SessionPhase.ICEBREAKER) nextPhase = SessionPhase.FOCUS;
     else if (currentP === SessionPhase.FOCUS) nextPhase = SessionPhase.DEBRIEF;
     else if (currentP === SessionPhase.DEBRIEF) nextPhase = SessionPhase.COMPLETED;
 
     if (nextPhase) {
-        // IMPORTANT: Write the Timestamp! This fixes the sync issue.
         await updateDoc(doc(db, 'sessions', sessionId), { 
             phase: nextPhase,
-            phaseStartTime: Date.now() 
+            phaseStartTime: Date.now(),
+            gameState: { type: null } // Reset game on phase change
         }).catch(console.error);
     }
   };
 
-  // --- REACTION LOGIC ---
   const handleReaction = async (emoji: string) => {
       const now = Date.now();
       if (now - lastReactionTime.current < 800) return; 
       lastReactionTime.current = now;
-
       triggerAura(emoji);
-      
       await updateDoc(doc(db, 'sessions', sessionId), {
           lastReaction: { emoji, senderId: user.id, timestamp: Date.now() }
       }).catch(console.error);
@@ -333,9 +350,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       let type: 'fire' | 'power' | 'wave' = 'wave';
       if (emoji === '🔥') type = 'fire';
       if (emoji === '💯') type = 'power';
-      
       setAura(type);
-      
       if (auraTimeoutRef.current) clearTimeout(auraTimeoutRef.current);
       auraTimeoutRef.current = setTimeout(() => setAura(null), 2500);
   };
@@ -344,14 +359,12 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
-      
       const id = Date.now();
       setRipples(prev => [...prev, { id, x, y }]);
       setTimeout(() => setRipples(prev => prev.filter(r => r.id !== id)), 1000);
       handleReaction('👋'); 
   };
 
-  // --- 5. REPORT ---
   const handleReportSubmit = async () => {
       if (!reportReason) return;
       try {
@@ -367,12 +380,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           setIsReportOpen(false);
           setReportDetails('');
           alert("Report submitted successfully.");
-      } catch (e) {
-          console.error("Report error:", e);
-      }
+      } catch (e) { console.error("Report error:", e); }
   };
 
-  // --- MEDIA ---
   useEffect(() => {
       if (myVideoRef.current && localStream) myVideoRef.current.srcObject = localStream;
       if (partnerVideoRef.current && remoteStream) {
@@ -389,19 +399,16 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
         } else {
              trackEnabled = micEnabled;
         }
-        
         localStream.getAudioTracks().forEach(t => t.enabled = trackEnabled);
         localStream.getVideoTracks().forEach(t => t.enabled = camEnabled);
     }
   }, [micEnabled, camEnabled, localStream, phase, isPomodoroBreak]); 
 
-  // --- CHAT & TASK SYNC ---
   const { messages: chatMessages, sendMessage } = useChat(sessionReady ? sessionId : '', user.id, user.name);
   
  useEffect(() => {
     if (chatMessages.length > lastMsgCount.current) {
         const lastMsg = chatMessages[chatMessages.length - 1];
-        
         if (lastMsg.senderId !== 'me' && !isChatOpen) {
             setUnreadChatCount(prev => prev + 1);
             const id = Date.now().toString();
@@ -410,7 +417,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
         }
         lastMsgCount.current = chatMessages.length;
     }
-
     if (isChatOpen) {
         setUnreadChatCount(0);
         lastMsgCount.current = chatMessages.length;
@@ -426,7 +432,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
   const activePartnerTask = partnerTasks.find(t => !t.completed)?.text;
 
-  // --- DRAG ---
   const handleStartDrag = (clientX: number, clientY: number) => {
       setIsDragging(true);
       dragStart.current = { x: clientX - selfPos.x, y: clientY - selfPos.y };
@@ -458,7 +463,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       };
   }, [isDragging]);
 
-  // --- HANDLERS ---
   const handleAddTask = async (text: string) => {
     const newTask = { text, completed: false, ownerId: user.id, createdAt: serverTimestamp() };
     const docRef = await addDoc(collection(db, 'sessions', sessionId, 'tasks'), newTask);
@@ -516,6 +520,10 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           90% { transform: translateY(-10px) scale(1); opacity: 1; }
           100% { transform: translateY(-20px) scale(0.95); opacity: 0; }
         }
+        @keyframes breath {
+            0%, 100% { transform: scale(0.8); opacity: 0.5; }
+            50% { transform: scale(1.5); opacity: 0.9; }
+        }
         .vignette {
             background: radial-gradient(circle, transparent 40%, rgba(0,0,0,0.9) 100%);
         }
@@ -527,7 +535,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           </div>
       )}
 
-      {/* --- PARTNER VIDEO CONTAINER --- */}
+      {/* --- PARTNER VIDEO --- */}
       <div 
         className={`absolute inset-0 z-10 transition-all duration-[1500ms] ease-in-out border-4 ${getAuraClass()} ${phase === SessionPhase.FOCUS ? 'scale-[0.98] rounded-2xl overflow-hidden' : ''}`}
         onClick={handlePartnerClick} 
@@ -550,26 +558,16 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
               </div>
           )}
 
-          {/* Ripples Layer */}
           <div className="absolute inset-0 pointer-events-none overflow-hidden">
               {ripples.map(r => (
                   <div 
                     key={r.id}
                     className="absolute border border-white/50 rounded-full bg-white/10"
-                    style={{
-                        left: r.x,
-                        top: r.y,
-                        width: '50px',
-                        height: '50px',
-                        marginLeft: '-25px',
-                        marginTop: '-25px',
-                        animation: 'ripple-effect 1s ease-out forwards'
-                    }}
+                    style={{ left: r.x, top: r.y, width: '50px', height: '50px', marginLeft: '-25px', marginTop: '-25px', animation: 'ripple-effect 1s ease-out forwards' }}
                   />
               ))}
           </div>
 
-          {/* Partner Task HUD */}
           {activePartnerTask && showUI && (
               <div className="absolute bottom-8 left-0 right-0 flex justify-center pointer-events-none animate-in fade-in slide-in-from-bottom-2">
                    <div className="bg-black/60 backdrop-blur-md border border-white/10 px-4 py-2 rounded-full flex items-center gap-2 max-w-[80%] shadow-2xl">
@@ -582,7 +580,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
       <div className={`absolute inset-0 z-20 pointer-events-none transition-opacity duration-[2000ms] ${phase === SessionPhase.FOCUS ? 'opacity-100 vignette' : 'opacity-0'}`} />
 
-      {/* --- FLOATING CHAT MESSAGES --- */}
+      {/* --- FLOATING MESSAGES --- */}
       <div className="absolute bottom-32 left-0 right-0 z-30 flex flex-col items-center gap-2 pointer-events-none">
           {floatingMessages.map(msg => (
               <div key={msg.id} className="bg-black/60 backdrop-blur-md border border-white/10 px-4 py-2 rounded-full shadow-xl flex items-center gap-2 animate-[messageFloatUp_5s_ease-out_forwards]">
@@ -606,19 +604,95 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           </div>
       </div>
 
+      {/* --- GAME OVERLAY --- */}
+      {isGameOpen && (
+          <div className="absolute inset-0 z-[45] flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in">
+              <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden max-w-sm w-full relative">
+                  <div className="bg-slate-800/50 p-4 border-b border-slate-700 flex justify-between items-center">
+                      <h3 className="font-bold text-white flex items-center gap-2"><Gamepad2 size={18}/> Mini Games</h3>
+                      <button onClick={() => setIsGameOpen(false)} className="text-slate-400 hover:text-white"><X size={18}/></button>
+                  </div>
+                  
+                  <div className="p-6">
+                      {!gameState.type ? (
+                          <div className="grid grid-cols-3 gap-3">
+                              <button onClick={() => initGame('TICTACTOE')} className="flex flex-col items-center gap-2 p-4 bg-slate-800 rounded-xl hover:bg-slate-700 transition-colors">
+                                  <Square size={24} className="text-blue-400"/> <span className="text-xs text-slate-300">TicTacToe</span>
+                              </button>
+                              <button onClick={() => initGame('RPS')} className="flex flex-col items-center gap-2 p-4 bg-slate-800 rounded-xl hover:bg-slate-700 transition-colors">
+                                  <Scissors size={24} className="text-pink-400"/> <span className="text-xs text-slate-300">R.P.S.</span>
+                              </button>
+                              <button onClick={() => initGame('BREATH')} className="flex flex-col items-center gap-2 p-4 bg-slate-800 rounded-xl hover:bg-slate-700 transition-colors">
+                                  <Wind size={24} className="text-emerald-400"/> <span className="text-xs text-slate-300">Breathe</span>
+                              </button>
+                          </div>
+                      ) : (
+                          <div className="flex flex-col items-center gap-4">
+                              
+                              {/* --- TICTACTOE --- */}
+                              {gameState.type === 'TICTACTOE' && (
+                                  <>
+                                    <div className="grid grid-cols-3 gap-2 bg-slate-800 p-2 rounded-xl">
+                                        {gameState.board?.map((cell, i) => (
+                                            <button 
+                                                key={i} 
+                                                onClick={() => handleTicTacToeMove(i)}
+                                                disabled={!!cell || gameState.winner !== null}
+                                                className="w-16 h-16 bg-slate-900 rounded-lg flex items-center justify-center text-2xl font-bold border border-slate-700 hover:bg-slate-800 disabled:hover:bg-slate-900"
+                                            >
+                                                {cell === user.id ? '❌' : cell ? '⭕' : ''}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className="text-sm text-slate-300">
+                                        {gameState.winner 
+                                            ? (gameState.winner === 'DRAW' ? "It's a Draw!" : (gameState.winner === user.id ? "You Won! 🎉" : `${partner.name} Won!`))
+                                            : (gameState.turn === user.id ? "Your Turn (❌)" : `${partner.name}'s Turn (⭕)`)}
+                                    </div>
+                                  </>
+                              )}
+
+                              {/* --- RPS --- */}
+                              {gameState.type === 'RPS' && (
+                                  <>
+                                    <div className="flex gap-4">
+                                        <button onClick={() => handleRPSMove('ROCK')} disabled={!!gameState.moves?.[user.id]} className="p-4 bg-slate-800 rounded-full hover:bg-slate-700 disabled:opacity-50 text-2xl">🪨</button>
+                                        <button onClick={() => handleRPSMove('PAPER')} disabled={!!gameState.moves?.[user.id]} className="p-4 bg-slate-800 rounded-full hover:bg-slate-700 disabled:opacity-50 text-2xl">📄</button>
+                                        <button onClick={() => handleRPSMove('SCISSORS')} disabled={!!gameState.moves?.[user.id]} className="p-4 bg-slate-800 rounded-full hover:bg-slate-700 disabled:opacity-50 text-2xl">✂️</button>
+                                    </div>
+                                    <div className="text-sm text-slate-300 mt-2">
+                                        {gameState.winner 
+                                            ? (gameState.winner === 'DRAW' ? "Draw! try again." : (gameState.winner === user.id ? "You Won! 🎉" : `${partner.name} Won!`))
+                                            : (gameState.moves?.[user.id] ? "Waiting for partner..." : "Choose your weapon!")}
+                                    </div>
+                                  </>
+                              )}
+
+                              {/* --- BREATH --- */}
+                              {gameState.type === 'BREATH' && (
+                                  <>
+                                    <div className="w-24 h-24 bg-emerald-500/20 rounded-full border border-emerald-500/50 flex items-center justify-center animate-[breath_4s_ease-in-out_infinite]">
+                                        <span className="text-xs text-emerald-200">Breathe</span>
+                                    </div>
+                                    <p className="text-xs text-slate-400">Sync your breath...</p>
+                                  </>
+                              )}
+
+                              <button onClick={() => updateGame({ type: null, moves: {}, board: [], winner: null })} className="text-xs text-slate-500 hover:text-white mt-4 underline">Back to Menu</button>
+                          </div>
+                      )}
+                  </div>
+              </div>
+          </div>
+      )}
+
       {/* --- MAIN UI LAYER --- */}
       <div className={`absolute inset-0 pointer-events-none z-40 transition-opacity duration-500 ${showUI ? 'opacity-100' : 'opacity-0'}`}>
         
-        {/* TOP BAR: TIMER & PHASE */}
+        {/* TOP BAR */}
         <div className="absolute top-4 md:top-6 left-0 right-0 flex justify-center pointer-events-none px-14 md:px-0">
             <div className={`backdrop-blur-xl border rounded-full px-5 py-2 flex items-center gap-3 shadow-2xl transition-all duration-700 ${phase === SessionPhase.FOCUS ? 'bg-black/80 border-red-500/20 text-red-50' : 'bg-slate-900/80 border-slate-700'}`}>
-                <span className={`text-[10px] font-bold uppercase tracking-widest ${
-                    phase === SessionPhase.FOCUS 
-                        ? (isPomodoroBreak ? 'text-emerald-400' : 'text-red-400') 
-                        : 'text-slate-400'
-                }`}>
-                    {phaseLabel}
-                </span>
+                <span className={`text-[10px] font-bold uppercase tracking-widest ${phase === SessionPhase.FOCUS ? (isPomodoroBreak ? 'text-emerald-400' : 'text-red-400') : 'text-slate-400'}`}>{phaseLabel}</span>
                 <div className="w-px h-3 bg-white/10"></div>
                 <span className="font-mono text-lg font-variant-numeric tabular-nums text-white">
                     {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
@@ -626,48 +700,14 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             </div>
         </div>
 
-        {/* TOP BUTTONS */}
-        <div className="absolute top-4 md:top-6 left-4 md:left-6 pointer-events-auto">
-            <button 
-                onClick={() => setIsReportOpen(true)} 
-                onMouseEnter={() => setIsInteracting(true)}
-                onMouseLeave={() => setIsInteracting(false)}
-                className="p-3 rounded-full bg-black/40 text-slate-400 hover:text-white border border-white/5 hover:bg-slate-800 transition-all"
-            >
-                <Flag size={16} />
-            </button>
-        </div>
-        <div className="absolute top-4 md:top-6 right-4 md:right-6 pointer-events-auto">
-            <Button 
-                variant="danger" 
-                onClick={handleExitClick} 
-                onMouseEnter={() => setIsInteracting(true)}
-                onMouseLeave={() => setIsInteracting(false)}
-                className="py-2 px-3 text-xs bg-red-500/10 hover:bg-red-500/20 border-red-500/30 text-red-400 backdrop-blur-md"
-            >
-                <LogOut size={14} className="mr-2"/> <span className="hidden md:inline">Exit</span>
-            </Button>
-        </div>
-
-        {/* CHAT & TASKS */}
-        <div 
-            className="pointer-events-auto"
-            onMouseEnter={() => setIsInteracting(true)}
-            onMouseLeave={() => setIsInteracting(false)}
-            onTouchStart={() => setIsInteracting(true)}
-        >
-             <ChatWindow messages={chatMessages} onSendMessage={sendMessage} partnerName={partner.name} isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
-             <TaskBoard isOpen={isTaskBoardOpen} onClose={() => setIsTaskBoardOpen(false)} myTasks={myTasks} partnerTasks={partnerTasks} onAddTask={handleAddTask} onToggleTask={handleToggleTask} onDeleteTask={handleDeleteTask} isRevealed={phase !== SessionPhase.FOCUS} canEdit={phase === SessionPhase.ICEBREAKER} partnerName={partner.name} />
-        </div>
-
-        {/* BOTTOM CONTROLS */}
+        {/* CONTROLS */}
         <div className="absolute bottom-8 left-0 right-0 px-4 flex flex-col md:flex-row items-center justify-center gap-4 pointer-events-auto">
              
              {/* Reactions */}
              <div className="bg-black/60 backdrop-blur-xl border border-white/10 rounded-full px-4 py-2 flex items-center gap-4 shadow-2xl order-1 md:order-none">
-                 <button onClick={() => handleReaction('🔥')} className="hover:scale-110 active:scale-95 transition-all text-xl grayscale hover:grayscale-0 opacity-80 hover:opacity-100" title="Send Motivation">🔥</button>
-                 <button onClick={() => handleReaction('💯')} className="hover:scale-110 active:scale-95 transition-all text-xl grayscale hover:grayscale-0 opacity-80 hover:opacity-100" title="Respect">💯</button>
-                 <button onClick={() => handleReaction('👋')} className="hover:scale-110 active:scale-95 transition-all text-xl grayscale hover:grayscale-0 opacity-80 hover:opacity-100" title="Wave">👋</button>
+                 <button onClick={() => handleReaction('🔥')} className="hover:scale-110 text-xl grayscale hover:grayscale-0 opacity-80 hover:opacity-100">🔥</button>
+                 <button onClick={() => handleReaction('💯')} className="hover:scale-110 text-xl grayscale hover:grayscale-0 opacity-80 hover:opacity-100">💯</button>
+                 <button onClick={() => handleReaction('👋')} className="hover:scale-110 text-xl grayscale hover:grayscale-0 opacity-80 hover:opacity-100">👋</button>
              </div>
 
              {/* Main Controls */}
@@ -679,20 +719,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                 )}
 
                 <button 
-                    onClick={() => { 
-                        if (phase !== SessionPhase.FOCUS || isPomodoroBreak) { 
-                            setMicEnabled(!micEnabled); 
-                            setManualMicToggle(!micEnabled); 
-                        }
-                    }} 
+                    onClick={() => { if (phase !== SessionPhase.FOCUS || isPomodoroBreak) { setMicEnabled(!micEnabled); setManualMicToggle(!micEnabled); }}} 
                     disabled={phase === SessionPhase.FOCUS && !isPomodoroBreak} 
-                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
-                        (phase === SessionPhase.FOCUS && !isPomodoroBreak) 
-                        ? 'opacity-30 cursor-not-allowed' 
-                        : micEnabled 
-                            ? 'bg-white/10 hover:bg-white/20 text-white' 
-                            : 'bg-red-500/20 text-red-400'
-                    }`}
+                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${(phase === SessionPhase.FOCUS && !isPomodoroBreak) ? 'opacity-30 cursor-not-allowed' : micEnabled ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-red-500/20 text-red-400'}`}
                 >
                     {micEnabled && (phase !== SessionPhase.FOCUS || isPomodoroBreak) ? <Mic size={18} /> : <MicOff size={18} />}
                 </button>
@@ -702,6 +731,15 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                 </button>
 
                 <div className="w-px h-6 bg-white/10 mx-1"></div>
+
+                {/* GAME BUTTON - DISABLED DURING DEEP WORK */}
+                <button 
+                    onClick={() => setIsGameOpen(!isGameOpen)} 
+                    disabled={phase === SessionPhase.FOCUS && !isPomodoroBreak}
+                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${isGameOpen ? 'bg-pink-500 text-white' : (phase === SessionPhase.FOCUS && !isPomodoroBreak ? 'opacity-30 cursor-not-allowed' : 'hover:bg-white/10 text-pink-400 hover:text-white')}`}
+                >
+                    <Gamepad2 size={18} />
+                </button>
 
                 <button onClick={() => { setIsChatOpen(!isChatOpen); setUnreadChatCount(0); }} className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10 text-slate-300 hover:text-white relative transition-colors">
                     <MessageSquare size={18} />
@@ -722,18 +760,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
         )}
 
         {(isReportOpen || exitModalStep > 0) && (
-            <div 
-                className="absolute inset-0 z-[60] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in"
-                onMouseEnter={() => setIsInteracting(true)}
-                onMouseLeave={() => setIsInteracting(false)}
-            >
-                {/* Reports and Exit Modal content remains unchanged */}
+            <div className="absolute inset-0 z-[60] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in" onMouseEnter={() => setIsInteracting(true)} onMouseLeave={() => setIsInteracting(false)}>
                 {isReportOpen && (
                     <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4 pointer-events-auto">
                         <div className="flex justify-between items-center">
-                            <h3 className="text-white font-bold flex items-center gap-2">
-                                <Flag size={18} className="text-red-500"/> Report User
-                            </h3>
+                            <h3 className="text-white font-bold flex items-center gap-2"><Flag size={18} className="text-red-500"/> Report User</h3>
                             <button onClick={() => setIsReportOpen(false)} className="text-slate-500 hover:text-white"><X size={20}/></button>
                         </div>
                         <div className="space-y-2">
@@ -756,7 +787,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                         </div>
                     </div>
                 )}
-
                 {exitModalStep > 0 && (
                     <div className="max-w-md w-full bg-slate-900 border border-white/10 rounded-2xl p-6 shadow-2xl relative overflow-hidden pointer-events-auto">
                         {exitModalStep === 1 ? (
@@ -784,7 +814,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                 )}
             </div>
         )}
-
       </div>
     </div>
   );

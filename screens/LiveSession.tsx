@@ -76,7 +76,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const partnerVideoRef = useRef<HTMLVideoElement>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const auraTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
+const lastMsgCount = useRef(0); 
   // ---------------------------------------------------------------------------
   // ADDED: POMODORO LOGIC START
   // ---------------------------------------------------------------------------
@@ -379,17 +379,26 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   // --- CHAT & TASK SYNC ---
   const { messages: chatMessages, sendMessage } = useChat(sessionReady ? sessionId : '', user.id, user.name);
   
-  useEffect(() => {
-    if (chatMessages.length > 0) {
+ useEffect(() => {
+    // Only run logic if a NEW message actually arrived
+    if (chatMessages.length > lastMsgCount.current) {
         const lastMsg = chatMessages[chatMessages.length - 1];
+        
         if (lastMsg.senderId !== 'me' && !isChatOpen) {
             setUnreadChatCount(prev => prev + 1);
             const id = Date.now().toString();
             setFloatingMessages(prev => [...prev, { id, text: lastMsg.text, sender: partner.name }]);
             setTimeout(() => setFloatingMessages(prev => prev.filter(m => m.id !== id)), 6000);
         }
+        // Update tracker to current length
+        lastMsgCount.current = chatMessages.length;
     }
-    if (isChatOpen) setUnreadChatCount(0);
+
+    // If chat is open, reset count and sync tracker immediately
+    if (isChatOpen) {
+        setUnreadChatCount(0);
+        lastMsgCount.current = chatMessages.length;
+    }
   }, [chatMessages, isChatOpen]);
 
   useEffect(() => {

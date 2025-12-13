@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Partner, SessionPhase, User, SessionConfig, SessionDuration, TodoItem } from '../types';
 import { Button } from '../components/Button';
 import { generateIcebreaker } from '../services/geminiService';
-import { Mic, MicOff, Video, VideoOff, Sparkles, LogOut, User as UserIcon, MessageSquare, ListChecks, Flag, X, AlertTriangle, HeartCrack, CheckCircle2 } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, Sparkles, LogOut, User as UserIcon, MessageSquare, ListChecks, Flag, X, AlertTriangle, HeartCrack, CheckCircle2, Gamepad2, Trophy, Zap, Circle } from 'lucide-react';
 import { ChatWindow } from '../components/ChatWindow';
 import { TaskBoard } from '../components/TaskBoard';
 import { SessionRecap } from '../components/SessionRecap';
@@ -17,6 +17,23 @@ interface LiveSessionProps {
   config: SessionConfig;
   sessionId: string; 
   onEndSession: () => void;
+}
+
+// --- GAME LOGIC TYPES ---
+type GameType = 'TICTACTOE' | 'RPS' | 'PONG' | null;
+
+interface GameState {
+    type: GameType;
+    // TicTacToe
+    board?: (string | null)[]; 
+    turn?: string; // userId
+    // RPS
+    moves?: Record<string, string>; 
+    // Pong (Rally)
+    ballOwner?: string; // Who has the ball?
+    rallyCount?: number;
+    // Common
+    winner?: string | 'DRAW' | null;
 }
 
 export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config, sessionId, onEndSession }) => {
@@ -46,7 +63,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [isTaskBoardOpen, setIsTaskBoardOpen] = useState(false);
   const [showUI, setShowUI] = useState(true); 
-  
+
+  // --- GAME STATE ---
+  const [isGameOpen, setIsGameOpen] = useState(false);
+  const [gameInvite, setGameInvite] = useState(false); // Notification
+  const [gameState, setGameState] = useState<GameState>({ type: null });
   // REPLACED: Floating Emojis -> Ripples & Aura
   const [ripples, setRipples] = useState<{id: number, x: number, y: number}[]>([]);
   const [aura, setAura] = useState<'neutral' | 'fire' | 'power' | 'wave' | null>(null);
@@ -184,7 +205,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
   const { localStream, remoteStream } = useWebRTC(isReadyForWebRTC ? sessionId : '', user.id, isInitiator);
 
-  // --- 2. SYNC & REACTIONS (FIXED TIME SYNC) ---
+  // --- 2. SYNC & REACTIONS & GAMES ---
   useEffect(() => {
     if (!sessionId) return;
 
@@ -192,19 +213,22 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
         if (!docSnap.exists()) return;
         const data = docSnap.data();
 
-        // Save server timestamp locally
+        // Sync Time
         if (data.phaseStartTime) {
             phaseStartTimeRef.current = data.phaseStartTime;
         }
 
+        // Sync Phase
         if (data.phase && data.phase !== phaseRef.current) {
             setPhase(data.phase as SessionPhase);
             phaseRef.current = data.phase as SessionPhase;
 
-            // Handle Mic State on Phase Change
+            // Handle Phase Changes
             if (data.phase === SessionPhase.FOCUS) {
                 setMicEnabled(false); 
                 setManualMicToggle(false); 
+                setIsGameOpen(false); // FORCE CLOSE GAME ON WORK START
+                setGameInvite(false);
             } else if (data.phase === SessionPhase.DEBRIEF) {
                 setMicEnabled(true);
                 setManualMicToggle(true);
@@ -212,6 +236,52 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                 finishSession(false);
             }
         }
+
+        // --- GAME SYNC ---
+        if (data.gameState) {
+             setGameState(data.gameState);
+             
+             // Logic: If partner started a game, and I don't have it open, show invite
+             if (data.gameState.type && !isGameOpen && phase !== SessionPhase.FOCUS) {
+                 setGameInvite(true);
+             } else if (!data.gameState.type) {
+                 setGameInvite(false); // Clear invite if game ended
+             }
+        }
+
+        // Timer Correction
+        if (data.phaseStartTime) {
+            const now = Date.now();
+            const elapsedSeconds = Math.floor((now - data.phaseStartTime) / 1000);
+            
+            let totalDurationForPhase = 0;
+            if (data.phase === SessionPhase.ICEBREAKER) totalDurationForPhase = isTest ? 30 : config.preTalkMinutes * 60;
+            else if (data.phase === SessionPhase.FOCUS) totalDurationForPhase = isTest ? 30 : (config.duration - config.preTalkMinutes - config.postTalkMinutes) * 60;
+            else if (data.phase === SessionPhase.DEBRIEF) totalDurationForPhase = isTest ? 30 : config.postTalkMinutes * 60;
+            
+            const exactTimeLeft = Math.max(0, totalDurationForPhase - elapsedSeconds);
+            
+            setTimeLeft(prev => {
+                if (Math.abs(prev - exactTimeLeft) > 2) return exactTimeLeft;
+                return prev;
+            });
+        }
+
+        // Reactions
+        if (data.lastReaction && data.lastReaction.senderId !== user.id) {
+            if (Date.now() - data.lastReaction.timestamp < 2000) {
+                triggerAura(data.lastReaction.emoji);
+            }
+        }
+
+        if ((data.status === 'completed' || data.status === 'aborted') && data.abortedBy && data.abortedBy !== user.id) {
+            alert("Partner ended the session.");
+            onEndSession();
+        }
+    });
+    return () => unsub();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, user.id, config, isTest, isGameOpen]);
 
         // --- FIXED SYNC LOGIC ---
         // Calculate remaining time based on Server Start Time
@@ -250,6 +320,78 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, user.id, config, isTest]);
 
+// --- GAME LOGIC ---
+  const updateGame = async (newState: Partial<GameState>) => {
+      await updateDoc(doc(db, 'sessions', sessionId), {
+          gameState: { ...gameState, ...newState }
+      });
+  };
+
+  const initGame = (type: GameType) => {
+      setGameInvite(false); // Clear notification
+      if (type === 'TICTACTOE') {
+          // Initiator is always X, Partner is O
+          updateGame({ type, board: Array(9).fill(null), turn: isInitiator ? user.id : partner.id, winner: null });
+      } else if (type === 'RPS') {
+          updateGame({ type, moves: {}, winner: null });
+      } else if (type === 'PONG') {
+          // Rally Pong: Ball starts with whoever clicked start
+          updateGame({ type, ballOwner: user.id, rallyCount: 0, winner: null });
+      }
+  };
+
+  // 1. TIC TAC TOE
+  const handleTicTacToeMove = (index: number) => {
+      if (!gameState.board || gameState.board[index] || gameState.winner || gameState.turn !== user.id) return;
+      
+      const newBoard = [...gameState.board];
+      newBoard[index] = user.id; 
+      
+      const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+      let winner = null;
+      for (let i = 0; i < lines.length; i++) {
+          const [a,b,c] = lines[i];
+          if (newBoard[a] && newBoard[a] === newBoard[b] && newBoard[a] === newBoard[c]) {
+              winner = newBoard[a];
+          }
+      }
+      if (!winner && !newBoard.includes(null)) winner = 'DRAW';
+
+      updateGame({ board: newBoard, turn: partner.id, winner });
+  };
+
+  // 2. ROCK PAPER SCISSORS
+  const handleRPSMove = (move: string) => {
+      if (gameState.moves?.[user.id]) return; 
+      const newMoves = { ...gameState.moves, [user.id]: move };
+      let winner = null;
+      
+      if (Object.keys(newMoves).length === 2) {
+          const myMove = newMoves[user.id];
+          const theirMove = newMoves[partner.id];
+          
+          if (myMove === theirMove) winner = 'DRAW';
+          else if (
+              (myMove === 'ROCK' && theirMove === 'SCISSORS') ||
+              (myMove === 'PAPER' && theirMove === 'ROCK') ||
+              (myMove === 'SCISSORS' && theirMove === 'PAPER')
+          ) winner = user.id;
+          else winner = partner.id;
+      }
+      updateGame({ moves: newMoves, winner });
+  };
+
+  // 3. RALLY PONG (Lag-Free Version)
+  const handlePongHit = () => {
+      if (gameState.ballOwner !== user.id || gameState.winner) return;
+      // Hit ball to partner
+      updateGame({ ballOwner: partner.id, rallyCount: (gameState.rallyCount || 0) + 1 });
+  };
+  
+  const handlePongMiss = () => {
+      // I missed the ball, partner wins
+      updateGame({ winner: partner.id });
+  };
   // --- 3. ZEN MODE / MOUSE HANDLING ---
   useEffect(() => {
       const handleMouseMove = () => {
@@ -605,7 +747,140 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
               {!micEnabled && <div className="bg-red-500/80 p-1 rounded-full"><MicOff size={10} className="text-white"/></div>}
           </div>
       </div>
+{/* --- AESTHETIC GAME OVERLAY --- */}
+      {isGameOpen && (
+          <div className="absolute inset-0 z-[45] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+              <div className="bg-[#0f172a] border border-slate-700/50 rounded-3xl shadow-2xl overflow-hidden max-w-sm w-full relative transition-all">
+                  
+                  {/* Header */}
+                  <div className="bg-slate-900/50 p-5 border-b border-white/5 flex justify-between items-center backdrop-blur-md">
+                      <h3 className="font-bold text-slate-200 flex items-center gap-2 text-sm tracking-wide uppercase">
+                          <Gamepad2 size={16} className="text-emerald-400"/> Game Center
+                      </h3>
+                      <button onClick={() => { setIsGameOpen(false); setGameInvite(false); }} className="text-slate-500 hover:text-white transition-colors">
+                          <X size={20}/>
+                      </button>
+                  </div>
+                  
+                  <div className="p-8">
+                      {!gameState.type ? (
+                          /* MENU */
+                          <div className="grid grid-cols-3 gap-4">
+                              <button onClick={() => initGame('TICTACTOE')} className="group flex flex-col items-center gap-3 p-4 bg-slate-800/50 rounded-2xl border border-white/5 hover:bg-slate-800 hover:border-emerald-500/30 transition-all hover:-translate-y-1">
+                                  <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center group-hover:bg-blue-500/20 transition-colors"><X size={20} className="text-blue-400"/></div>
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">TicTacToe</span>
+                              </button>
+                              <button onClick={() => initGame('RPS')} className="group flex flex-col items-center gap-3 p-4 bg-slate-800/50 rounded-2xl border border-white/5 hover:bg-slate-800 hover:border-emerald-500/30 transition-all hover:-translate-y-1">
+                                  <div className="w-10 h-10 rounded-full bg-pink-500/10 flex items-center justify-center group-hover:bg-pink-500/20 transition-colors"><Zap size={20} className="text-pink-400"/></div>
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">R.P.S.</span>
+                              </button>
+                              <button onClick={() => initGame('PONG')} className="group flex flex-col items-center gap-3 p-4 bg-slate-800/50 rounded-2xl border border-white/5 hover:bg-slate-800 hover:border-emerald-500/30 transition-all hover:-translate-y-1">
+                                  <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center group-hover:bg-emerald-500/20 transition-colors"><Trophy size={20} className="text-emerald-400"/></div>
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Rally</span>
+                              </button>
+                          </div>
+                      ) : (
+                          /* GAME BOARD */
+                          <div className="flex flex-col items-center gap-6 animate-in slide-in-from-bottom-4 duration-500">
+                              
+                              {/* --- TICTACTOE --- */}
+                              {gameState.type === 'TICTACTOE' && (
+                                  <>
+                                    <div className="grid grid-cols-3 gap-2 bg-slate-800/50 p-2 rounded-2xl border border-white/5">
+                                        {gameState.board?.map((cell, i) => (
+                                            <button 
+                                                key={i} 
+                                                onClick={() => handleTicTacToeMove(i)}
+                                                disabled={!!cell || gameState.winner !== null}
+                                                className="w-16 h-16 bg-[#0f172a] rounded-xl flex items-center justify-center text-3xl font-bold border border-slate-700/50 hover:bg-slate-800 disabled:hover:bg-[#0f172a] transition-all"
+                                            >
+                                                {cell === user.id ? <span className="text-blue-400">×</span> : cell ? <span className="text-pink-400">○</span> : ''}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className={`text-sm font-bold tracking-wide px-4 py-2 rounded-full ${gameState.winner ? (gameState.winner === user.id ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400') : 'bg-slate-800 text-slate-400'}`}>
+                                        {gameState.winner 
+                                            ? (gameState.winner === 'DRAW' ? "It's a Draw!" : (gameState.winner === user.id ? "You Won! 🎉" : "You Lost 😔"))
+                                            : (gameState.turn === user.id ? "Your Turn" : "Opponent's Turn")}
+                                    </div>
+                                  </>
+                              )}
 
+                              {/* --- RPS --- */}
+                              {gameState.type === 'RPS' && (
+                                  <>
+                                    <div className="flex justify-center gap-4">
+                                        {['ROCK', 'PAPER', 'SCISSORS'].map(move => (
+                                            <button 
+                                                key={move}
+                                                onClick={() => handleRPSMove(move)} 
+                                                disabled={!!gameState.moves?.[user.id]} 
+                                                className={`w-16 h-16 rounded-full flex items-center justify-center text-2xl bg-slate-800 border border-slate-700 hover:scale-110 hover:border-slate-500 transition-all ${gameState.moves?.[user.id] === move ? 'bg-blue-500/20 border-blue-500' : ''}`}
+                                            >
+                                                {move === 'ROCK' ? '🪨' : move === 'PAPER' ? '📄' : '✂️'}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className={`text-sm font-bold tracking-wide px-4 py-2 rounded-full ${gameState.winner ? (gameState.winner === user.id ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400') : 'bg-slate-800 text-slate-400'}`}>
+                                        {gameState.winner 
+                                            ? (gameState.winner === 'DRAW' ? "Draw! Try again." : (gameState.winner === user.id ? "You Won! 🎉" : "You Lost 😔"))
+                                            : (gameState.moves?.[user.id] ? "Waiting for opponent..." : "Choose your weapon")}
+                                    </div>
+                                  </>
+                              )}
+
+                              {/* --- RALLY PONG --- */}
+                              {gameState.type === 'PONG' && (
+                                  <div className="flex flex-col items-center w-full">
+                                      <div className="text-4xl font-black text-slate-700 mb-6 font-mono">
+                                          {gameState.rallyCount || 0}
+                                      </div>
+                                      
+                                      {gameState.winner ? (
+                                          <div className={`text-center p-4 rounded-xl w-full mb-4 ${gameState.winner === user.id ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400' : 'bg-red-500/10 border border-red-500/30 text-red-400'}`}>
+                                              <h2 className="text-xl font-bold">{gameState.winner === user.id ? 'VICTORY' : 'DEFEAT'}</h2>
+                                              <p className="text-xs opacity-70 mt-1">Rally reached {gameState.rallyCount}</p>
+                                          </div>
+                                      ) : (
+                                          <button
+                                              onClick={handlePongHit}
+                                              disabled={gameState.ballOwner !== user.id}
+                                              className={`w-32 h-32 rounded-full flex flex-col items-center justify-center transition-all duration-200 shadow-2xl ${
+                                                  gameState.ballOwner === user.id 
+                                                  ? 'bg-emerald-500 hover:bg-emerald-400 scale-110 cursor-pointer shadow-emerald-500/50' 
+                                                  : 'bg-slate-800 opacity-50 scale-90 cursor-not-allowed'
+                                              }`}
+                                          >
+                                              {gameState.ballOwner === user.id ? (
+                                                  <>
+                                                    <Circle size={32} className="text-white fill-white animate-ping absolute opacity-20"/>
+                                                    <span className="text-white font-black text-lg z-10">HIT!</span>
+                                                  </>
+                                              ) : (
+                                                  <span className="text-slate-400 text-xs font-bold uppercase tracking-widest">Wait</span>
+                                              )}
+                                          </button>
+                                      )}
+                                      
+                                      <p className="text-xs text-slate-500 mt-8 text-center max-w-[200px]">
+                                          {gameState.winner ? "Game Over" : "Click HIT when the ball is yours. Don't drop the rally!"}
+                                      </p>
+                                  </div>
+                              )}
+
+                              {/* Back Button */}
+                              <button 
+                                  onClick={() => updateGame({ type: null, moves: {}, board: [], winner: null })} 
+                                  className="text-xs text-slate-500 hover:text-white mt-2 border-t border-white/5 pt-4 w-full"
+                              >
+                                  Back to Menu
+                              </button>
+                          </div>
+                      )}
+                  </div>
+              </div>
+          </div>
+      )}
       {/* --- MAIN UI LAYER --- */}
       <div className={`absolute inset-0 pointer-events-none z-40 transition-opacity duration-500 ${showUI ? 'opacity-100' : 'opacity-0'}`}>
         
@@ -701,7 +976,23 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                     {camEnabled ? <Video size={18} /> : <VideoOff size={18} />}
                 </button>
 
-                <div className="w-px h-6 bg-white/10 mx-1"></div>
+<div className="w-px h-6 bg-white/10 mx-1"></div>
+
+                {/* GAME BUTTON */}
+                <button 
+                    onClick={() => { setIsGameOpen(!isGameOpen); setGameInvite(false); }} 
+                    disabled={phase === SessionPhase.FOCUS && !isPomodoroBreak}
+                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-all relative ${
+                        isGameOpen ? 'bg-slate-700 text-white' : 
+                        (phase === SessionPhase.FOCUS && !isPomodoroBreak ? 'opacity-30 cursor-not-allowed' : 'hover:bg-white/10 text-slate-400 hover:text-white')
+                    }`}
+                >
+                    <Gamepad2 size={18} />
+                    {/* Invite Notification Dot */}
+                    {gameInvite && !isGameOpen && (
+                        <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-500 rounded-full border-2 border-black animate-bounce"></span>
+                    )}
+                </button>
 
                 <button onClick={() => { setIsChatOpen(!isChatOpen); setUnreadChatCount(0); }} className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10 text-slate-300 hover:text-white relative transition-colors">
                     <MessageSquare size={18} />

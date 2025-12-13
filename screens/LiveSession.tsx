@@ -2,8 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Partner, SessionPhase, User, SessionConfig, SessionDuration, TodoItem } from '../types';
 import { Button } from '../components/Button';
 import { generateIcebreaker } from '../services/geminiService';
-// ADDED: Game Icons (Gamepad2, Square, Scissors, Wind)
-import { Mic, MicOff, Video, VideoOff, Sparkles, LogOut, User as UserIcon, MessageSquare, ListChecks, Flag, X, AlertTriangle, HeartCrack, CheckCircle2, Gamepad2, Square, Scissors, Wind } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, Sparkles, LogOut, User as UserIcon, MessageSquare, ListChecks, Flag, X, AlertTriangle, HeartCrack, CheckCircle2 } from 'lucide-react';
 import { ChatWindow } from '../components/ChatWindow';
 import { TaskBoard } from '../components/TaskBoard';
 import { SessionRecap } from '../components/SessionRecap';
@@ -18,16 +17,6 @@ interface LiveSessionProps {
   config: SessionConfig;
   sessionId: string; 
   onEndSession: () => void;
-}
-
-// --- ADDED: GAME TYPES ---
-type GameType = 'TICTACTOE' | 'RPS' | 'BREATH' | null;
-interface GameState {
-    type: GameType;
-    board?: (string | null)[]; // For TicTacToe
-    turn?: string; // userId
-    moves?: Record<string, string>; // For RPS { userId: 'ROCK' }
-    winner?: string | 'DRAW' | null;
 }
 
 export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config, sessionId, onEndSession }) => {
@@ -58,10 +47,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [isTaskBoardOpen, setIsTaskBoardOpen] = useState(false);
   const [showUI, setShowUI] = useState(true); 
   
-  // --- ADDED: GAME STATE ---
-  const [isGameOpen, setIsGameOpen] = useState(false);
-  const [gameState, setGameState] = useState<GameState>({ type: null });
-
   // REPLACED: Floating Emojis -> Ripples & Aura
   const [ripples, setRipples] = useState<{id: number, x: number, y: number}[]>([]);
   const [aura, setAura] = useState<'neutral' | 'fire' | 'power' | 'wave' | null>(null);
@@ -178,8 +163,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
               // Entering Work: Disable Mic
               setMicEnabled(false);
               setManualMicToggle(false);
-              // ADDED: FORCE CLOSE GAME IF WORK STARTS
-              setIsGameOpen(false);
           }
           
           prevPomodoroBreak.current = isPomodoroBreak;
@@ -222,22 +205,12 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             if (data.phase === SessionPhase.FOCUS) {
                 setMicEnabled(false); 
                 setManualMicToggle(false); 
-                setIsGameOpen(false); // ADDED: Close game
             } else if (data.phase === SessionPhase.DEBRIEF) {
                 setMicEnabled(true);
                 setManualMicToggle(true);
             } else if (data.phase === SessionPhase.COMPLETED) {
                 finishSession(false);
             }
-        }
-
-        // --- ADDED: GAME STATE SYNC ---
-        if (data.gameState) {
-             setGameState(data.gameState);
-             // If partner started a game and we are in a valid phase, auto-open the window
-             if (data.gameState.type && !isGameOpen && phase !== SessionPhase.FOCUS) {
-                 setIsGameOpen(true);
-             }
         }
 
         // --- FIXED SYNC LOGIC ---
@@ -277,64 +250,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, user.id, config, isTest]);
 
-  // --- ADDED: GAME LOGIC FUNCTIONS ---
-  const updateGame = async (newState: Partial<GameState>) => {
-      await updateDoc(doc(db, 'sessions', sessionId), {
-          gameState: { ...gameState, ...newState }
-      });
-  };
-
-  const initGame = (type: GameType) => {
-      if (type === 'TICTACTOE') {
-          updateGame({ type, board: Array(9).fill(null), turn: isInitiator ? user.id : partner.id, winner: null });
-      } else if (type === 'RPS') {
-          updateGame({ type, moves: {}, winner: null });
-      } else if (type === 'BREATH') {
-          updateGame({ type, winner: null });
-      }
-  };
-
-  const handleTicTacToeMove = (index: number) => {
-      if (!gameState.board || gameState.board[index] || gameState.winner || gameState.turn !== user.id) return;
-      
-      const newBoard = [...gameState.board];
-      newBoard[index] = user.id; 
-      
-      const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
-      let winner = null;
-      for (let i = 0; i < lines.length; i++) {
-          const [a,b,c] = lines[i];
-          if (newBoard[a] && newBoard[a] === newBoard[b] && newBoard[a] === newBoard[c]) {
-              winner = newBoard[a];
-          }
-      }
-      if (!winner && !newBoard.includes(null)) winner = 'DRAW';
-
-      updateGame({ board: newBoard, turn: partner.id, winner });
-  };
-
-  const handleRPSMove = (move: string) => {
-      if (gameState.moves?.[user.id]) return; 
-      
-      const newMoves = { ...gameState.moves, [user.id]: move };
-      let winner = null;
-      
-      if (Object.keys(newMoves).length === 2) {
-          const myMove = newMoves[user.id];
-          const theirMove = newMoves[partner.id];
-          
-          if (myMove === theirMove) winner = 'DRAW';
-          else if (
-              (myMove === 'ROCK' && theirMove === 'SCISSORS') ||
-              (myMove === 'PAPER' && theirMove === 'ROCK') ||
-              (myMove === 'SCISSORS' && theirMove === 'PAPER')
-          ) winner = user.id;
-          else winner = partner.id;
-      }
-      
-      updateGame({ moves: newMoves, winner });
-  };
-
   // --- 3. ZEN MODE / MOUSE HANDLING ---
   useEffect(() => {
       const handleMouseMove = () => {
@@ -343,13 +258,13 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           // In focus mode, hide UI faster (2s) to encourage work
           if (phase === SessionPhase.FOCUS) {
               if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-              if (!isInteracting && !isGameOpen) { // ADDED: Keep UI open if game is open
+              if (!isInteracting) {
                   controlsTimeoutRef.current = setTimeout(() => setShowUI(false), 2000);
               }
           }
       };
 
-      if (isInteracting || isGameOpen) { // ADDED: Game keeps UI awake
+      if (isInteracting) {
           setShowUI(true);
           if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
       } else {
@@ -363,7 +278,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           window.removeEventListener('touchstart', handleMouseMove);
           if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
       };
-  }, [phase, isInteracting, isGameOpen]); 
+  }, [phase, isInteracting]); 
 
   // --- 4. TIMER (With Local Countdown) ---
   useEffect(() => {
@@ -385,6 +300,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     let nextPhase: SessionPhase | null = null;
     const currentP = phaseRef.current; 
     
+    // Double check we haven't already moved (prevent double triggers)
+    // In a real app we might use a transition flag, but checking timeLeft or phase is decent
+    
     if (currentP === SessionPhase.ICEBREAKER) nextPhase = SessionPhase.FOCUS;
     else if (currentP === SessionPhase.FOCUS) nextPhase = SessionPhase.DEBRIEF;
     else if (currentP === SessionPhase.DEBRIEF) nextPhase = SessionPhase.COMPLETED;
@@ -393,8 +311,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
         // IMPORTANT: Write the Timestamp! This fixes the sync issue.
         await updateDoc(doc(db, 'sessions', sessionId), { 
             phase: nextPhase,
-            phaseStartTime: Date.now(),
-            gameState: { type: null } // ADDED: Reset game on phase change
+            phaseStartTime: Date.now() 
         }).catch(console.error);
     }
   };
@@ -599,10 +516,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           90% { transform: translateY(-10px) scale(1); opacity: 1; }
           100% { transform: translateY(-20px) scale(0.95); opacity: 0; }
         }
-        @keyframes breath {
-            0%, 100% { transform: scale(0.8); opacity: 0.5; }
-            50% { transform: scale(1.5); opacity: 0.9; }
-        }
         .vignette {
             background: radial-gradient(circle, transparent 40%, rgba(0,0,0,0.9) 100%);
         }
@@ -692,96 +605,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
               {!micEnabled && <div className="bg-red-500/80 p-1 rounded-full"><MicOff size={10} className="text-white"/></div>}
           </div>
       </div>
-
-      {/* --- ADDED: GAME OVERLAY --- */}
-      {isGameOpen && (
-          <div className="absolute inset-0 z-[45] flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in">
-              <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden max-w-sm w-full relative">
-                  {/* Game Header */}
-                  <div className="bg-slate-800/50 p-4 border-b border-slate-700 flex justify-between items-center">
-                      <h3 className="font-bold text-white flex items-center gap-2"><Gamepad2 size={18}/> Mini Games</h3>
-                      <button onClick={() => setIsGameOpen(false)} className="text-slate-400 hover:text-white"><X size={18}/></button>
-                  </div>
-                  
-                  <div className="p-6">
-                      {!gameState.type ? (
-                          /* Game Selection Menu */
-                          <div className="grid grid-cols-3 gap-3">
-                              <button onClick={() => initGame('TICTACTOE')} className="flex flex-col items-center gap-2 p-4 bg-slate-800 rounded-xl hover:bg-slate-700 transition-colors">
-                                  <Square size={24} className="text-blue-400"/> <span className="text-xs text-slate-300">TicTacToe</span>
-                              </button>
-                              <button onClick={() => initGame('RPS')} className="flex flex-col items-center gap-2 p-4 bg-slate-800 rounded-xl hover:bg-slate-700 transition-colors">
-                                  <Scissors size={24} className="text-pink-400"/> <span className="text-xs text-slate-300">R.P.S.</span>
-                              </button>
-                              <button onClick={() => initGame('BREATH')} className="flex flex-col items-center gap-2 p-4 bg-slate-800 rounded-xl hover:bg-slate-700 transition-colors">
-                                  <Wind size={24} className="text-emerald-400"/> <span className="text-xs text-slate-300">Breathe</span>
-                              </button>
-                          </div>
-                      ) : (
-                          /* Active Game View */
-                          <div className="flex flex-col items-center gap-4">
-                              
-                              {/* --- TICTACTOE BOARD --- */}
-                              {gameState.type === 'TICTACTOE' && (
-                                  <>
-                                    <div className="grid grid-cols-3 gap-2 bg-slate-800 p-2 rounded-xl">
-                                        {gameState.board?.map((cell, i) => (
-                                            <button 
-                                                key={i} 
-                                                onClick={() => handleTicTacToeMove(i)}
-                                                disabled={!!cell || gameState.winner !== null}
-                                                className="w-16 h-16 bg-slate-900 rounded-lg flex items-center justify-center text-2xl font-bold border border-slate-700 hover:bg-slate-800 disabled:hover:bg-slate-900 transition-all duration-200"
-                                            >
-                                                {/* Handcrafted Typography for X/O */}
-                                                {cell === user.id 
-                                                    ? <span className="text-blue-400 drop-shadow-md animate-in zoom-in spin-in-12">✕</span> 
-                                                    : cell 
-                                                        ? <span className="text-pink-400 drop-shadow-md animate-in zoom-in">○</span> 
-                                                        : ''}
-                                            </button>
-                                        ))}
-                                    </div>
-                                    <div className="text-sm font-medium text-slate-300 flex items-center gap-2">
-                                        {gameState.winner 
-                                            ? (gameState.winner === 'DRAW' ? "It's a Draw!" : (gameState.winner === user.id ? <span className="text-blue-400">You Won! 🎉</span> : <span className="text-pink-400">{partner.name} Won!</span>))
-                                            : (gameState.turn === user.id ? <span className="text-blue-400 animate-pulse">Your Turn</span> : <span className="text-slate-500">Waiting for {partner.name}...</span>)}
-                                    </div>
-                                  </>
-                              )}
-
-                              {/* --- RPS --- */}
-                              {gameState.type === 'RPS' && (
-                                  <>
-                                    <div className="flex gap-4">
-                                        <button onClick={() => handleRPSMove('ROCK')} disabled={!!gameState.moves?.[user.id]} className="p-4 bg-slate-800 rounded-full hover:bg-slate-700 disabled:opacity-50 text-2xl transition-transform hover:scale-110">🪨</button>
-                                        <button onClick={() => handleRPSMove('PAPER')} disabled={!!gameState.moves?.[user.id]} className="p-4 bg-slate-800 rounded-full hover:bg-slate-700 disabled:opacity-50 text-2xl transition-transform hover:scale-110">📄</button>
-                                        <button onClick={() => handleRPSMove('SCISSORS')} disabled={!!gameState.moves?.[user.id]} className="p-4 bg-slate-800 rounded-full hover:bg-slate-700 disabled:opacity-50 text-2xl transition-transform hover:scale-110">✂️</button>
-                                    </div>
-                                    <div className="text-sm text-slate-300 mt-2">
-                                        {gameState.winner 
-                                            ? (gameState.winner === 'DRAW' ? "Draw! try again." : (gameState.winner === user.id ? "You Won! 🎉" : `${partner.name} Won!`))
-                                            : (gameState.moves?.[user.id] ? "Waiting for partner..." : "Choose your weapon!")}
-                                    </div>
-                                  </>
-                              )}
-
-                              {/* --- BREATH --- */}
-                              {gameState.type === 'BREATH' && (
-                                  <>
-                                    <div className="w-32 h-32 bg-emerald-500/10 rounded-full border border-emerald-500/30 flex items-center justify-center animate-[breath_4s_ease-in-out_infinite]">
-                                        <span className="text-xs text-emerald-200 font-medium tracking-widest uppercase">Breathe</span>
-                                    </div>
-                                    <p className="text-xs text-slate-400">Sync with the circle...</p>
-                                  </>
-                              )}
-
-                              <button onClick={() => updateGame({ type: null, moves: {}, board: [], winner: null })} className="text-xs text-slate-500 hover:text-white mt-4 underline">Back to Menu</button>
-                          </div>
-                      )}
-                  </div>
-              </div>
-          </div>
-      )}
 
       {/* --- MAIN UI LAYER --- */}
       <div className={`absolute inset-0 pointer-events-none z-40 transition-opacity duration-500 ${showUI ? 'opacity-100' : 'opacity-0'}`}>
@@ -879,18 +702,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                 </button>
 
                 <div className="w-px h-6 bg-white/10 mx-1"></div>
-
-                {/* ADDED: GAME BUTTON */}
-                <button 
-                    onClick={() => setIsGameOpen(!isGameOpen)} 
-                    disabled={phase === SessionPhase.FOCUS && !isPomodoroBreak}
-                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
-                        isGameOpen ? 'bg-pink-500 text-white' : 
-                        (phase === SessionPhase.FOCUS && !isPomodoroBreak ? 'opacity-30 cursor-not-allowed' : 'hover:bg-white/10 text-pink-400 hover:text-white')
-                    }`}
-                >
-                    <Gamepad2 size={18} />
-                </button>
 
                 <button onClick={() => { setIsChatOpen(!isChatOpen); setUnreadChatCount(0); }} className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10 text-slate-300 hover:text-white relative transition-colors">
                     <MessageSquare size={18} />

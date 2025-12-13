@@ -5,6 +5,13 @@ import { Briefcase, BookOpen, Code, Clock, Coffee, Play, FlaskConical, LogOut, A
 import { LiveRequests } from '../components/LiveRequests';
 import { db } from '../utils/firebaseConfig';
 import { collection, onSnapshot } from 'firebase/firestore';
+
+interface DashboardProps {
+    user: User;
+    onStartMatch: (config: SessionConfig) => void;
+    onLogout: () => void;
+}
+
 export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogout }) => {
 const [selectedType, setSelectedType] = useState<SessionType>(SessionType.STUDY);
 const [selectedDuration, setSelectedDuration] = useState<SessionDuration>(SessionDuration.MIN_30);
@@ -151,7 +158,8 @@ return (
       className="w-full py-4 text-lg shadow-blue-500/25 shadow-xl"
     >
       <Play size={20} className="fill-current" />
-      Find Partner
+      {/* --- MODIFIED: Dynamic Button Text based on Lobby --- */}
+      {lobbyCount > 0 ? 'Join Queue (Fast Match)' : 'Find Partner'}
     </Button>
   </div>
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Partner, SessionPhase, User, SessionConfig, SessionDuration, TodoItem } from '../types';
 import { Button } from '../components/Button';
 import { generateIcebreaker } from '../services/geminiService';
-import { Mic, MicOff, Video, VideoOff, Sparkles, LogOut, User as UserIcon, MessageSquare, ListChecks, Flag, X, AlertTriangle, HeartCrack, CheckCircle2 } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, Sparkles, LogOut, User as UserIcon, MessageSquare, ListChecks, Flag, X, AlertTriangle, HeartCrack, CheckCircle2, Gamepad2 } from 'lucide-react';
 import { ChatWindow } from '../components/ChatWindow';
 import { TaskBoard } from '../components/TaskBoard';
 import { SessionRecap } from '../components/SessionRecap';
@@ -11,6 +11,7 @@ import { useWebRTC } from '../hooks/useWebRTC';
 import { db } from '../utils/firebaseConfig';
 import { collection, query, where, updateDoc, doc, addDoc, onSnapshot, deleteDoc, serverTimestamp, increment } from 'firebase/firestore';
 import { GameOverlay, GameState } from '../components/GameOverlay';
+
 interface LiveSessionProps {
   user: User;
   partner: Partner;
@@ -47,6 +48,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [isTaskBoardOpen, setIsTaskBoardOpen] = useState(false);
   const [showUI, setShowUI] = useState(true); 
   
+  // --- GAME STATE ---
+  const [isGameOpen, setIsGameOpen] = useState(false);
+  const [gameInvite, setGameInvite] = useState(false); // Notification
+  const [gameState, setGameState] = useState<GameState>({ type: null });
+
   // REPLACED: Floating Emojis -> Ripples & Aura
   const [ripples, setRipples] = useState<{id: number, x: number, y: number}[]>([]);
   const [aura, setAura] = useState<'neutral' | 'fire' | 'power' | 'wave' | null>(null);
@@ -163,6 +169,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
               // Entering Work: Disable Mic
               setMicEnabled(false);
               setManualMicToggle(false);
+              setIsGameOpen(false); // Force Close Game
           }
           
           prevPomodoroBreak.current = isPomodoroBreak;
@@ -205,6 +212,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             if (data.phase === SessionPhase.FOCUS) {
                 setMicEnabled(false); 
                 setManualMicToggle(false); 
+                setIsGameOpen(false); 
             } else if (data.phase === SessionPhase.DEBRIEF) {
                 setMicEnabled(true);
                 setManualMicToggle(true);
@@ -213,7 +221,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             }
         }
 
-     // --- GAME SYNC ---
+        // --- GAME SYNC ---
         if (data.gameState) {
              setGameState(data.gameState);
              if (data.gameState.type && !isGameOpen && phase !== SessionPhase.FOCUS) {
@@ -223,7 +231,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
              }
         }
 
-        // Timer Correction
+        // --- FIXED SYNC LOGIC ---
+        // Calculate remaining time based on Server Start Time
         if (data.phaseStartTime) {
             const now = Date.now();
             const elapsedSeconds = Math.floor((now - data.phaseStartTime) / 1000);
@@ -235,6 +244,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             
             const exactTimeLeft = Math.max(0, totalDurationForPhase - elapsedSeconds);
             
+            // Only update if difference is significant (drift > 2 seconds) to avoid jitter
+            // OR if we are initializing (timeLeft matches default)
             setTimeLeft(prev => {
                 if (Math.abs(prev - exactTimeLeft) > 2) return exactTimeLeft;
                 return prev;
@@ -265,13 +276,13 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           // In focus mode, hide UI faster (2s) to encourage work
           if (phase === SessionPhase.FOCUS) {
               if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-              if (!isInteracting) {
+              if (!isInteracting && !isGameOpen) {
                   controlsTimeoutRef.current = setTimeout(() => setShowUI(false), 2000);
               }
           }
       };
 
-      if (isInteracting) {
+      if (isInteracting || isGameOpen) {
           setShowUI(true);
           if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
       } else {
@@ -285,7 +296,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           window.removeEventListener('touchstart', handleMouseMove);
           if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
       };
-  }, [phase, isInteracting]); 
+  }, [phase, isInteracting, isGameOpen]); 
 
   // --- 4. TIMER (With Local Countdown) ---
   useEffect(() => {
@@ -318,7 +329,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
         // IMPORTANT: Write the Timestamp! This fixes the sync issue.
         await updateDoc(doc(db, 'sessions', sessionId), { 
             phase: nextPhase,
-            phaseStartTime: Date.now() 
+            phaseStartTime: Date.now(),
+            gameState: { type: null } // Reset game
         }).catch(console.error);
     }
   };
@@ -612,7 +624,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
               {!micEnabled && <div className="bg-red-500/80 p-1 rounded-full"><MicOff size={10} className="text-white"/></div>}
           </div>
       </div>
-{/* --- GAME OVERLAY --- */}
+
+      {/* --- GAME OVERLAY --- */}
       {isGameOpen && (
           <GameOverlay 
             sessionId={sessionId}
@@ -628,6 +641,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             onClose={() => setIsGameOpen(false)}
           />
       )}
+
       {/* --- MAIN UI LAYER --- */}
       <div className={`absolute inset-0 pointer-events-none z-40 transition-opacity duration-500 ${showUI ? 'opacity-100' : 'opacity-0'}`}>
         
@@ -724,6 +738,22 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                 </button>
 
                 <div className="w-px h-6 bg-white/10 mx-1"></div>
+
+                {/* GAME BUTTON */}
+                <button 
+                    onClick={() => { setIsGameOpen(!isGameOpen); setGameInvite(false); }} 
+                    disabled={phase === SessionPhase.FOCUS && !isPomodoroBreak}
+                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-all relative ${
+                        isGameOpen ? 'bg-slate-700 text-white' : 
+                        (phase === SessionPhase.FOCUS && !isPomodoroBreak ? 'opacity-30 cursor-not-allowed' : 'hover:bg-white/10 text-slate-400 hover:text-white')
+                    }`}
+                >
+                    <Gamepad2 size={18} />
+                    {/* Invite Notification Dot */}
+                    {gameInvite && !isGameOpen && (
+                        <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-500 rounded-full border-2 border-black animate-bounce"></span>
+                    )}
+                </button>
 
                 <button onClick={() => { setIsChatOpen(!isChatOpen); setUnreadChatCount(0); }} className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10 text-slate-300 hover:text-white relative transition-colors">
                     <MessageSquare size={18} />

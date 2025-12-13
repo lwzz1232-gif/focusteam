@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '../components/Button';
 import { SessionConfig, Partner, SessionMode } from '../types';
-import { Zap, Timer, CheckCircle2, User, Users, XCircle } from 'lucide-react';
+import { Zap, Timer, CheckCircle2, User, Users, XCircle, Clock } from 'lucide-react';
 import { doc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../utils/firebaseConfig';
 
@@ -27,7 +27,7 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
   const [partnerMode, setPartnerMode] = useState<SessionMode | null>(null);
   const [partnerPreTalk, setPartnerPreTalk] = useState<number | null>(null);
   const [partnerPostTalk, setPartnerPostTalk] = useState<number | null>(null);
-  const [partnerDuration, setPartnerDuration] = useState<number | null>(null); // ADDED: To track their duration
+  const [partnerDuration, setPartnerDuration] = useState<number | null>(null); 
 
   // Final Result
   const [finalConfig, setFinalConfig] = useState<SessionConfig | null>(null);
@@ -56,10 +56,7 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
         if (!docSnap.exists()) return;
         const data = docSnap.data();
         
-        // Check for negotiation data
         const negotiation = data.negotiation || {};
-        
-        // Find partner's data (key is NOT my userId)
         const partnerKey = Object.keys(negotiation).find(k => k !== userId);
         
         if (partnerKey && negotiation[partnerKey]) {
@@ -67,7 +64,7 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
             setPartnerMode(pData.mode);
             setPartnerPreTalk(pData.preTalk);
             setPartnerPostTalk(pData.postTalk);
-            setPartnerDuration(pData.duration); // ADDED: Read their duration
+            setPartnerDuration(pData.duration); 
         }
     });
 
@@ -76,22 +73,19 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
 
   // 3. CHECK IF BOTH HAVE SUBMITTED -> CALCULATE AGREEMENT
   useEffect(() => {
-    // Only proceed if we are waiting AND partner data has arrived
     if (step === 'WAITING' && partnerMode && partnerPreTalk !== null && partnerPostTalk !== null && partnerDuration !== null) {
         
-        // Deterministic Calculation
         const agreedPre = Math.ceil((myPreTalk + partnerPreTalk) / 2);
         const agreedPost = Math.ceil((myPostTalk + partnerPostTalk) / 2);
         const agreedMode = (myMode === partnerMode) ? myMode : SessionMode.DEEP_WORK; 
         
-        // ADDED: Synchronization Logic for Duration (Lowest Common Denominator)
-        // If I have 30m and you have 60m, we MUST do 30m.
+        // SYNC LOGIC: Always pick the shortest duration
         const agreedDuration = Math.min(config.duration, partnerDuration);
 
         const agreedConfig = {
             ...config,
             mode: agreedMode,
-            duration: agreedDuration, // ADDED: Override the config duration
+            duration: agreedDuration,
             preTalkMinutes: agreedPre,
             postTalkMinutes: agreedPost
         };
@@ -115,7 +109,7 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
                 mode: currentMode,
                 preTalk: currentPre,
                 postTalk: currentPost,
-                duration: config.duration // ADDED: Send my intended duration
+                duration: config.duration // Send my requested duration
             }
         });
     } catch (err) {
@@ -137,14 +131,14 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
   // 5. Timers for transitioning UI
   useEffect(() => {
     if (step === 'REVIEW') {
-      const timer = setTimeout(() => setStep('AGREED'), 3500); 
+      const timer = setTimeout(() => setStep('AGREED'), 4000); // Slightly longer to read the mismatch warning
       return () => clearTimeout(timer);
     }
   }, [step]);
 
   useEffect(() => {
     if (step === 'AGREED' && finalConfig) {
-      const timer = setTimeout(() => onNegotiationComplete(finalConfig), 3000); 
+      const timer = setTimeout(() => onNegotiationComplete(finalConfig), 3500); 
       return () => clearTimeout(timer);
     }
   }, [step, finalConfig, onNegotiationComplete]);
@@ -257,10 +251,10 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
                         <User size={20} className="text-blue-400" />
                         <span className="font-bold text-slate-200">You</span>
                     </div>
-                    {/* ADDED: Show my duration */}
-                    <div className="flex justify-between text-sm border-b border-slate-800 pb-2">
+                    {/* Highlighted Duration Row */}
+                    <div className={`flex justify-between text-sm border-b border-slate-800 pb-2 ${config.duration !== partnerDuration ? 'text-amber-300 font-medium' : ''}`}>
                         <span className="text-slate-500">Duration</span>
-                        <span className="text-slate-300">{config.duration}m</span>
+                        <span>{config.duration}m</span>
                     </div>
                     <div className="flex justify-between text-sm border-b border-slate-800 pb-2">
                         <span className="text-slate-500">Mode</span>
@@ -283,10 +277,10 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
                         <User size={20} className="text-emerald-400" />
                         <span className="font-bold text-slate-200">{partner.name}</span>
                     </div>
-                    {/* ADDED: Show partner duration */}
-                    <div className="flex justify-between text-sm border-b border-slate-800 pb-2">
+                    {/* Highlighted Duration Row */}
+                    <div className={`flex justify-between text-sm border-b border-slate-800 pb-2 ${config.duration !== partnerDuration ? 'text-amber-300 font-medium' : ''}`}>
                         <span className="text-slate-500">Duration</span>
-                        <span className="text-slate-300">{partnerDuration}m</span>
+                        <span>{partnerDuration}m</span>
                     </div>
                     <div className="flex justify-between text-sm border-b border-slate-800 pb-2">
                         <span className="text-slate-500">Mode</span>
@@ -303,11 +297,20 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
                 </div>
              </div>
              
-             {/* ADDED: Message if duration was mismatched */}
+             {/* ALERT: Explicit message about the sync */}
              {partnerDuration && partnerDuration !== config.duration && (
-                 <p className="text-center text-amber-400 mt-8 text-sm bg-amber-500/10 p-2 rounded-lg border border-amber-500/20">
-                     ⚠️ Times mismatched. Syncing session to the shorter duration ({Math.min(partnerDuration, config.duration)}m).
-                 </p>
+                 <div className="mt-8 bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex items-center gap-3 animate-pulse">
+                     <div className="p-2 bg-amber-500/20 rounded-full">
+                         <Clock className="text-amber-400" size={24} />
+                     </div>
+                     <div className="text-left">
+                         <h4 className="text-amber-400 font-bold text-sm">Session Time Synced</h4>
+                         <p className="text-amber-200/70 text-xs">
+                             You requested {Math.max(config.duration, partnerDuration)}m, but {config.duration > partnerDuration ? partner.name : 'you'} only had {Math.min(config.duration, partnerDuration)}m. 
+                             We synced to the shorter time.
+                         </p>
+                     </div>
+                 </div>
              )}
          </div>
       )}
@@ -318,25 +321,33 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
                  <CheckCircle2 size={32} className="text-white" />
              </div>
              <h2 className="text-2xl font-bold text-white mb-2">Agreed Settings</h2>
-             <p className="text-slate-300 mb-6">We found a middle ground.</p>
+             
+             {/* ALERT: Updated Status Message */}
+             <p className="text-slate-300 mb-6">
+                 {config.duration !== finalConfig.duration 
+                    ? <span className="text-amber-400 font-medium">Time adjusted to match partner.</span> 
+                    : "We found a middle ground."}
+             </p>
 
              <div className="grid grid-cols-2 gap-4 mb-4">
-                 <div className="bg-slate-900/50 p-3 rounded-lg">
+                 <div className="bg-slate-900/50 p-3 rounded-lg border border-white/5">
                      <div className="text-xs text-slate-500 uppercase tracking-wide">Total Time</div>
-                     {/* ADDED: Show final duration */}
-                     <div className="font-bold text-emerald-400 text-lg">{finalConfig.duration} min</div>
+                     {/* Final Duration */}
+                     <div className={`font-bold text-lg ${config.duration !== finalConfig.duration ? 'text-amber-400' : 'text-emerald-400'}`}>
+                        {finalConfig.duration} min
+                     </div>
                  </div>
-                 <div className="bg-slate-900/50 p-3 rounded-lg">
+                 <div className="bg-slate-900/50 p-3 rounded-lg border border-white/5">
                      <div className="text-xs text-slate-500 uppercase tracking-wide">Mode</div>
                      <div className="font-bold text-emerald-400 text-lg">{finalConfig.mode === SessionMode.POMODORO ? 'Pomodoro' : 'Deep Work'}</div>
                  </div>
              </div>
              <div className="grid grid-cols-2 gap-4 mb-8">
-                 <div className="bg-slate-900/50 p-3 rounded-lg">
+                 <div className="bg-slate-900/50 p-3 rounded-lg border border-white/5">
                      <div className="text-xs text-slate-500 uppercase tracking-wide">Icebreaker</div>
                      <div className="font-bold text-emerald-400">{finalConfig.preTalkMinutes} min</div>
                  </div>
-                 <div className="bg-slate-900/50 p-3 rounded-lg">
+                 <div className="bg-slate-900/50 p-3 rounded-lg border border-white/5">
                      <div className="text-xs text-slate-500 uppercase tracking-wide">Debrief</div>
                      <div className="font-bold text-emerald-400">{finalConfig.postTalkMinutes} min</div>
                  </div>

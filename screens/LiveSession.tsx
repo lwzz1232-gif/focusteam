@@ -285,40 +285,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
         // --- FIXED SYNC LOGIC ---
         // Calculate remaining time based on Server Start Time
-        if (data.phaseStartTime) {
-            const now = Date.now();
-            const elapsedSeconds = Math.floor((now - data.phaseStartTime) / 1000);
-            
-            let totalDurationForPhase = 0;
-            if (data.phase === SessionPhase.ICEBREAKER) totalDurationForPhase = isTest ? 30 : config.preTalkMinutes * 60;
-            else if (data.phase === SessionPhase.FOCUS) totalDurationForPhase = isTest ? 30 : (config.duration - config.preTalkMinutes - config.postTalkMinutes) * 60;
-            else if (data.phase === SessionPhase.DEBRIEF) totalDurationForPhase = isTest ? 30 : config.postTalkMinutes * 60;
-            
-            const exactTimeLeft = Math.max(0, totalDurationForPhase - elapsedSeconds);
-            
-            // Only update if difference is significant (drift > 2 seconds) to avoid jitter
-            // OR if we are initializing (timeLeft matches default)
-            setTimeLeft(prev => {
-                if (Math.abs(prev - exactTimeLeft) > 2) return exactTimeLeft;
-                return prev;
-            });
-        }
-
-        // Reactions
-        if (data.lastReaction && data.lastReaction.senderId !== user.id) {
-            if (Date.now() - data.lastReaction.timestamp < 2000) {
-                triggerAura(data.lastReaction.emoji);
-            }
-        }
-
-        if ((data.status === 'completed' || data.status === 'aborted') && data.abortedBy && data.abortedBy !== user.id) {
-            alert("Partner ended the session.");
-            onEndSession();
-        }
-    });
-    return () => unsub();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, user.id, config, isTest]);
+      
 
 // --- GAME LOGIC ---
   const updateGame = async (newState: Partial<GameState>) => {

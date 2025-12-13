@@ -77,6 +77,98 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const auraTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // ---------------------------------------------------------------------------
+  // ADDED: POMODORO LOGIC START
+  // ---------------------------------------------------------------------------
+  
+  // 1. Calculate total expected focus duration to determine cycles
+  const calculatedFocusDuration = isTest ? 30 : (config.duration - config.preTalkMinutes - config.postTalkMinutes) * 60;
+  
+  // 2. Check if mode is Pomodoro (handling potentially untyped config from props)
+  const isPomodoroMode = (config as any).mode === 'POMODORO' || (config as any).mode === 1;
+
+  // 3. Helper to determine current Pomodoro state based on timeLeft
+  const getPomodoroState = () => {
+      // Only apply during FOCUS phase and if enabled
+      if (phase !== SessionPhase.FOCUS || !isPomodoroMode || isTest) {
+          return { isPomodoroBreak: false, label: 'FOCUS' };
+      }
+
+      // Calculate elapsed time in Focus phase
+      const elapsed = calculatedFocusDuration - timeLeft;
+      
+      // Standard Pomodoro: 25m Work + 5m Break = 30m (1800s) cycle
+      const cycleDuration = 30 * 60; 
+      const workDuration = 25 * 60;
+
+      // Determine position in the current cycle
+      const cyclePosition = elapsed % cycleDuration;
+      
+      // If we are past the work duration in this cycle, it's a break
+      const isBreak = cyclePosition >= workDuration;
+
+      return {
+          isPomodoroBreak: isBreak,
+          label: isBreak ? 'FOCUS • BREAK' : 'FOCUS • WORK'
+      };
+  };
+
+  const { isPomodoroBreak, label: phaseLabel } = getPomodoroState();
+  const prevPomodoroBreak = useRef(isPomodoroBreak);
+
+  // 4. Sound Effect Helper (Soft Ding)
+  const playSoftDing = () => {
+      try {
+          const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+          if (!AudioContext) return;
+          const ctx = new AudioContext();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5 (Soft Pitch)
+          
+          // Soft attack and decay
+          gain.gain.setValueAtTime(0, ctx.currentTime);
+          gain.gain.linearRampToValueAtTime(0.1, ctx.currentTime + 0.1); // Low volume (0.1)
+          gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 2); // Slow fade
+          
+          osc.start();
+          osc.stop(ctx.currentTime + 2);
+      } catch (e) {
+          // Fallback or silence
+      }
+  };
+
+  // 5. Effect: Handle Work/Break Transitions (Audio & Mic)
+  useEffect(() => {
+      if (phase !== SessionPhase.FOCUS) return;
+
+      if (isPomodoroBreak !== prevPomodoroBreak.current) {
+          // Transition detected
+          playSoftDing();
+          
+          if (isPomodoroBreak) {
+              // Entering Break: Enable Mic
+              setMicEnabled(true);
+              setManualMicToggle(true);
+          } else {
+              // Entering Work: Disable Mic
+              setMicEnabled(false);
+              setManualMicToggle(false);
+          }
+          
+          prevPomodoroBreak.current = isPomodoroBreak;
+      }
+  }, [isPomodoroBreak, phase]);
+
+  // ---------------------------------------------------------------------------
+  // ADDED: POMODORO LOGIC END
+  // ---------------------------------------------------------------------------
+
   // --- 1. SETUP & WEBRTC ---
   useEffect(() => {
     if (!sessionId || !user.id || !partner.id) return;
@@ -101,8 +193,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             phaseRef.current = data.phase as SessionPhase;
 
             if (data.phase === SessionPhase.FOCUS) {
+                // MODIFIED: Initial mic state depends on if we start immediately in a break (unlikely) or work
+                // But generally Focus starts with Work.
                 setMicEnabled(false); 
                 setManualMicToggle(false); 
+                // EXISTING: Time calculation remains same, Pomodoro logic just interprets it
                 setTimeLeft(isTest ? 30 : (config.duration - config.preTalkMinutes - config.postTalkMinutes) * 60);
             } else if (data.phase === SessionPhase.DEBRIEF) {
                 setMicEnabled(true);
@@ -253,11 +348,33 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
   useEffect(() => {
     if(localStream) {
-        const shouldMute = phase === SessionPhase.FOCUS ? false : micEnabled;
-        localStream.getAudioTracks().forEach(t => t.enabled = shouldMute);
+        // MODIFIED: In Focus, mute depends on whether it's a break or not
+        // If phase is FOCUS:
+        //    - if isPomodoroBreak -> enabled = micEnabled (User preference)
+        //    - else -> enabled = false (Muted)
+        const shouldMute = phase === SessionPhase.FOCUS 
+            ? (isPomodoroBreak ? !micEnabled : true) 
+            : !micEnabled;
+            
+        // Note: 'enabled' means "Is it ON?". 'shouldMute' means "Should we silence it?".
+        // Existing logic used 'enabled = shouldMute' which seemed inverted in variable naming vs logic
+        // Original: const shouldMute = phase === SessionPhase.FOCUS ? false : micEnabled;
+        // Original: t.enabled = shouldMute;
+        // If Focus -> shouldMute = false -> enabled = false -> Muted. Correct.
+        // If Not Focus -> shouldMute = micEnabled (true) -> enabled = true -> On. Correct.
+        
+        // New Logic mapping:
+        let trackEnabled = false;
+        if (phase === SessionPhase.FOCUS) {
+             trackEnabled = isPomodoroBreak ? micEnabled : false;
+        } else {
+             trackEnabled = micEnabled;
+        }
+        
+        localStream.getAudioTracks().forEach(t => t.enabled = trackEnabled);
         localStream.getVideoTracks().forEach(t => t.enabled = camEnabled);
     }
-  }, [micEnabled, camEnabled, localStream, phase]);
+  }, [micEnabled, camEnabled, localStream, phase, isPomodoroBreak]); // ADDED isPomodoroBreak dependency
 
   // --- CHAT & TASK SYNC ---
   const { messages: chatMessages, sendMessage } = useChat(sessionReady ? sessionId : '', user.id, user.name);
@@ -355,6 +472,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   };
 
   const getAuraClass = () => {
+      // ADDED: Green Aura for Pomodoro Break
+      if (isPomodoroBreak) return 'border-emerald-500/60 shadow-[0_0_50px_rgba(16,185,129,0.4)]';
+      
       if (!aura) return 'border-white/5'; // Default border
       if (aura === 'fire') return 'border-orange-500/60 shadow-[0_0_50px_rgba(249,115,22,0.4)]';
       if (aura === 'power') return 'border-emerald-500/60 shadow-[0_0_50px_rgba(16,185,129,0.4)]';
@@ -472,8 +592,16 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
         
         {/* TOP BAR: TIMER & PHASE */}
         <div className="absolute top-4 md:top-6 left-0 right-0 flex justify-center pointer-events-none px-14 md:px-0">
+            {/* MODIFIED: Dynamic Colors and Text based on Pomodoro State */}
             <div className={`backdrop-blur-xl border rounded-full px-5 py-2 flex items-center gap-3 shadow-2xl transition-all duration-700 ${phase === SessionPhase.FOCUS ? 'bg-black/80 border-red-500/20 text-red-50' : 'bg-slate-900/80 border-slate-700'}`}>
-                <span className={`text-[10px] font-bold uppercase tracking-widest ${phase === SessionPhase.FOCUS ? 'text-red-400' : 'text-slate-400'}`}>{phase}</span>
+                <span className={`text-[10px] font-bold uppercase tracking-widest ${
+                    phase === SessionPhase.FOCUS 
+                        ? (isPomodoroBreak ? 'text-emerald-400' : 'text-red-400') 
+                        : 'text-slate-400'
+                }`}>
+                    {/* MODIFIED: Display Label */}
+                    {phaseLabel}
+                </span>
                 <div className="w-px h-3 bg-white/10"></div>
                 <span className="font-mono text-lg font-variant-numeric tabular-nums text-white">
                     {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
@@ -533,8 +661,25 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
                     </Button>
                 )}
 
-                <button onClick={() => { if(phase !== SessionPhase.FOCUS) { setMicEnabled(!micEnabled); setManualMicToggle(!micEnabled); }}} disabled={phase === SessionPhase.FOCUS} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${phase === SessionPhase.FOCUS ? 'opacity-30 cursor-not-allowed' : micEnabled ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-red-500/20 text-red-400'}`}>
-                    {micEnabled && phase !== SessionPhase.FOCUS ? <Mic size={18} /> : <MicOff size={18} />}
+                {/* MODIFIED: Button disabled state to allow toggling during Pomodoro Break */}
+                <button 
+                    onClick={() => { 
+                        // If it's Focus+Break, or NOT Focus, we allow toggle
+                        if (phase !== SessionPhase.FOCUS || isPomodoroBreak) { 
+                            setMicEnabled(!micEnabled); 
+                            setManualMicToggle(!micEnabled); 
+                        }
+                    }} 
+                    disabled={phase === SessionPhase.FOCUS && !isPomodoroBreak} 
+                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+                        (phase === SessionPhase.FOCUS && !isPomodoroBreak) 
+                        ? 'opacity-30 cursor-not-allowed' 
+                        : micEnabled 
+                            ? 'bg-white/10 hover:bg-white/20 text-white' 
+                            : 'bg-red-500/20 text-red-400'
+                    }`}
+                >
+                    {micEnabled && (phase !== SessionPhase.FOCUS || isPomodoroBreak) ? <Mic size={18} /> : <MicOff size={18} />}
                 </button>
 
                 <button onClick={() => setCamEnabled(!camEnabled)} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${camEnabled ? 'bg-white/10 hover:bg-white/20 text-white' : 'bg-red-500/20 text-red-400'}`}>

@@ -17,7 +17,6 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
   const [sessionIdToWatch, setSessionIdToWatch] = useState<string | null>(null);
   const [hasCalledOnMatch, setHasCalledOnMatch] = useState(false);
   
-  // CHANGED: Use State so the UI actually updates when broadcast happens
   const [isInLobby, setIsInLobby] = useState(false);
   const lobbyTicketRef = useRef<string | null>(null);
 
@@ -42,27 +41,34 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
     };
   }, [config, joinQueue, cancelSearch]);
 
-  // --- LOBBY BROADCAST LOGIC ---
+  // --- LOBBY BROADCAST LOGIC (FIXED: Race Condition Guard) ---
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
+    let isActive = true; // Guard to track if this effect is still valid
 
     // Only start timer if we are actively searching and NOT in lobby yet
     if (status === 'SEARCHING' && !sessionIdToWatch && !isInLobby) {
         timeoutId = setTimeout(async () => {
+            // Guard 1: Are we still waiting?
+            if (!isActive || sessionIdToWatch || lobbyTicketRef.current) return;
+
             try {
-                // Double check we are still searching before posting
-                if (!sessionIdToWatch && !lobbyTicketRef.current) {
-                    console.log("[MATCHING] 10s passed. Broadcasting to Live Lobby...");
-                    
-                    const lobbyRef = await addDoc(collection(db, 'waiting_room'), {
-                        userId: user.id,
-                        userName: user.name,
-                        config: config,
-                        createdAt: serverTimestamp()
-                    });
-                    
+                console.log("[MATCHING] 10s passed. Broadcasting to Live Lobby...");
+                
+                const lobbyRef = await addDoc(collection(db, 'waiting_room'), {
+                    userId: user.id,
+                    userName: user.name,
+                    config: config,
+                    createdAt: serverTimestamp()
+                });
+                
+                // Guard 2: Did user cancel while we were awaiting network?
+                if (!isActive) {
+                     console.log("[MATCHING] Cancelled during broadcast. Deleting ghost doc.");
+                     deleteDoc(lobbyRef).catch(console.error);
+                } else {
                     lobbyTicketRef.current = lobbyRef.id;
-                    setIsInLobby(true); // <--- This triggers the UI update
+                    setIsInLobby(true); 
                 }
             } catch (e) {
                 console.error("Lobby broadcast failed", e);
@@ -75,7 +81,10 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
         lobbyTicketRef.current = null;
     }
 
-    return () => clearTimeout(timeoutId);
+    return () => {
+        clearTimeout(timeoutId);
+        isActive = false; // Kill switch for async operations
+    };
   }, [status, sessionIdToWatch, user, config, isInLobby]);
 
   // Listen to session document

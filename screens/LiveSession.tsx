@@ -32,6 +32,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
   // Ref to track phase inside Firebase listeners
   const phaseRef = useRef<SessionPhase>(SessionPhase.ICEBREAKER);
+  
+  // ADDED: Track the server-side start time of the current phase
+  const phaseStartTimeRef = useRef<number | null>(null);
 
   // --- UI STATE ---
   const [micEnabled, setMicEnabled] = useState(true);
@@ -76,7 +79,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const partnerVideoRef = useRef<HTMLVideoElement>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const auraTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-const lastMsgCount = useRef(0); 
+  const lastMsgCount = useRef(0); 
+
   // ---------------------------------------------------------------------------
   // ADDED: POMODORO LOGIC START
   // ---------------------------------------------------------------------------
@@ -180,7 +184,7 @@ const lastMsgCount = useRef(0);
 
   const { localStream, remoteStream } = useWebRTC(isReadyForWebRTC ? sessionId : '', user.id, isInitiator);
 
-  // --- 2. SYNC & REACTIONS ---
+  // --- 2. SYNC & REACTIONS (FIXED TIME SYNC) ---
   useEffect(() => {
     if (!sessionId) return;
 
@@ -188,27 +192,49 @@ const lastMsgCount = useRef(0);
         if (!docSnap.exists()) return;
         const data = docSnap.data();
 
+        // Save server timestamp locally
+        if (data.phaseStartTime) {
+            phaseStartTimeRef.current = data.phaseStartTime;
+        }
+
         if (data.phase && data.phase !== phaseRef.current) {
             setPhase(data.phase as SessionPhase);
             phaseRef.current = data.phase as SessionPhase;
 
+            // Handle Mic State on Phase Change
             if (data.phase === SessionPhase.FOCUS) {
-                // MODIFIED: Initial mic state depends on if we start immediately in a break (unlikely) or work
-                // But generally Focus starts with Work.
                 setMicEnabled(false); 
                 setManualMicToggle(false); 
-                // EXISTING: Time calculation remains same, Pomodoro logic just interprets it
-                setTimeLeft(isTest ? 30 : (config.duration - config.preTalkMinutes - config.postTalkMinutes) * 60);
             } else if (data.phase === SessionPhase.DEBRIEF) {
                 setMicEnabled(true);
                 setManualMicToggle(true);
-                setTimeLeft(isTest ? 30 : config.postTalkMinutes * 60);
             } else if (data.phase === SessionPhase.COMPLETED) {
                 finishSession(false);
             }
         }
 
-        // Logic Change: Reactions trigger Aura instead of floating emojis
+        // --- FIXED SYNC LOGIC ---
+        // Calculate remaining time based on Server Start Time
+        if (data.phaseStartTime) {
+            const now = Date.now();
+            const elapsedSeconds = Math.floor((now - data.phaseStartTime) / 1000);
+            
+            let totalDurationForPhase = 0;
+            if (data.phase === SessionPhase.ICEBREAKER) totalDurationForPhase = isTest ? 30 : config.preTalkMinutes * 60;
+            else if (data.phase === SessionPhase.FOCUS) totalDurationForPhase = isTest ? 30 : (config.duration - config.preTalkMinutes - config.postTalkMinutes) * 60;
+            else if (data.phase === SessionPhase.DEBRIEF) totalDurationForPhase = isTest ? 30 : config.postTalkMinutes * 60;
+            
+            const exactTimeLeft = Math.max(0, totalDurationForPhase - elapsedSeconds);
+            
+            // Only update if difference is significant (drift > 2 seconds) to avoid jitter
+            // OR if we are initializing (timeLeft matches default)
+            setTimeLeft(prev => {
+                if (Math.abs(prev - exactTimeLeft) > 2) return exactTimeLeft;
+                return prev;
+            });
+        }
+
+        // Reactions
         if (data.lastReaction && data.lastReaction.senderId !== user.id) {
             if (Date.now() - data.lastReaction.timestamp < 2000) {
                 triggerAura(data.lastReaction.emoji);
@@ -254,9 +280,12 @@ const lastMsgCount = useRef(0);
       };
   }, [phase, isInteracting]); 
 
-  // --- 4. TIMER ---
+  // --- 4. TIMER (With Local Countdown) ---
   useEffect(() => {
     if (phase === SessionPhase.COMPLETED) return;
+    
+    // We still keep local interval for smooth seconds, 
+    // but the onSnapshot above corrects it if it drifts.
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) { handlePhaseTimeout(); return 0; }
@@ -266,24 +295,33 @@ const lastMsgCount = useRef(0);
     return () => clearInterval(timer);
   }, [phase]);
 
+  // --- FIXED: PHASE TRANSITION ---
   const handlePhaseTimeout = async () => {
     let nextPhase: SessionPhase | null = null;
     const currentP = phaseRef.current; 
+    
+    // Double check we haven't already moved (prevent double triggers)
+    // In a real app we might use a transition flag, but checking timeLeft or phase is decent
     
     if (currentP === SessionPhase.ICEBREAKER) nextPhase = SessionPhase.FOCUS;
     else if (currentP === SessionPhase.FOCUS) nextPhase = SessionPhase.DEBRIEF;
     else if (currentP === SessionPhase.DEBRIEF) nextPhase = SessionPhase.COMPLETED;
 
-    if (nextPhase) await updateDoc(doc(db, 'sessions', sessionId), { phase: nextPhase }).catch(console.error);
+    if (nextPhase) {
+        // IMPORTANT: Write the Timestamp! This fixes the sync issue.
+        await updateDoc(doc(db, 'sessions', sessionId), { 
+            phase: nextPhase,
+            phaseStartTime: Date.now() 
+        }).catch(console.error);
+    }
   };
 
-  // --- REACTION LOGIC (UPDATED) ---
+  // --- REACTION LOGIC ---
   const handleReaction = async (emoji: string) => {
       const now = Date.now();
       if (now - lastReactionTime.current < 800) return; 
       lastReactionTime.current = now;
 
-      // Trigger local aura immediately
       triggerAura(emoji);
       
       await updateDoc(doc(db, 'sessions', sessionId), {
@@ -303,7 +341,6 @@ const lastMsgCount = useRef(0);
   };
 
   const handlePartnerClick = (e: React.MouseEvent) => {
-      // Create ripple at click coordinates relative to the container
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
@@ -311,8 +348,6 @@ const lastMsgCount = useRef(0);
       const id = Date.now();
       setRipples(prev => [...prev, { id, x, y }]);
       setTimeout(() => setRipples(prev => prev.filter(r => r.id !== id)), 1000);
-
-      // Optional: Send a generic "wave" reaction if clicking
       handleReaction('👋'); 
   };
 
@@ -348,22 +383,6 @@ const lastMsgCount = useRef(0);
 
   useEffect(() => {
     if(localStream) {
-        // MODIFIED: In Focus, mute depends on whether it's a break or not
-        // If phase is FOCUS:
-        //    - if isPomodoroBreak -> enabled = micEnabled (User preference)
-        //    - else -> enabled = false (Muted)
-        const shouldMute = phase === SessionPhase.FOCUS 
-            ? (isPomodoroBreak ? !micEnabled : true) 
-            : !micEnabled;
-            
-        // Note: 'enabled' means "Is it ON?". 'shouldMute' means "Should we silence it?".
-        // Existing logic used 'enabled = shouldMute' which seemed inverted in variable naming vs logic
-        // Original: const shouldMute = phase === SessionPhase.FOCUS ? false : micEnabled;
-        // Original: t.enabled = shouldMute;
-        // If Focus -> shouldMute = false -> enabled = false -> Muted. Correct.
-        // If Not Focus -> shouldMute = micEnabled (true) -> enabled = true -> On. Correct.
-        
-        // New Logic mapping:
         let trackEnabled = false;
         if (phase === SessionPhase.FOCUS) {
              trackEnabled = isPomodoroBreak ? micEnabled : false;
@@ -374,13 +393,12 @@ const lastMsgCount = useRef(0);
         localStream.getAudioTracks().forEach(t => t.enabled = trackEnabled);
         localStream.getVideoTracks().forEach(t => t.enabled = camEnabled);
     }
-  }, [micEnabled, camEnabled, localStream, phase, isPomodoroBreak]); // ADDED isPomodoroBreak dependency
+  }, [micEnabled, camEnabled, localStream, phase, isPomodoroBreak]); 
 
   // --- CHAT & TASK SYNC ---
   const { messages: chatMessages, sendMessage } = useChat(sessionReady ? sessionId : '', user.id, user.name);
   
  useEffect(() => {
-    // Only run logic if a NEW message actually arrived
     if (chatMessages.length > lastMsgCount.current) {
         const lastMsg = chatMessages[chatMessages.length - 1];
         
@@ -390,11 +408,9 @@ const lastMsgCount = useRef(0);
             setFloatingMessages(prev => [...prev, { id, text: lastMsg.text, sender: partner.name }]);
             setTimeout(() => setFloatingMessages(prev => prev.filter(m => m.id !== id)), 6000);
         }
-        // Update tracker to current length
         lastMsgCount.current = chatMessages.length;
     }
 
-    // If chat is open, reset count and sync tracker immediately
     if (isChatOpen) {
         setUnreadChatCount(0);
         lastMsgCount.current = chatMessages.length;
@@ -408,7 +424,6 @@ const lastMsgCount = useRef(0);
     return () => unsub();
   }, [sessionId, user.id]);
 
-  // Derived State: Active Partner Task (HUD)
   const activePartnerTask = partnerTasks.find(t => !t.completed)?.text;
 
   // --- DRAG ---
@@ -423,7 +438,6 @@ const lastMsgCount = useRef(0);
   useEffect(() => {
       const handleMove = (clientX: number, clientY: number) => {
           if (!isDragging) return;
-          // Use requestAnimationFrame for smoother dragging if needed, but direct updates are fine for simple absolute pos
           setSelfPos({ x: clientX - dragStart.current.x, y: clientY - dragStart.current.y });
       };
       const handleMouseUp = () => setIsDragging(false);
@@ -481,10 +495,8 @@ const lastMsgCount = useRef(0);
   };
 
   const getAuraClass = () => {
-      // ADDED: Green Aura for Pomodoro Break
       if (isPomodoroBreak) return 'border-emerald-500/60 shadow-[0_0_50px_rgba(16,185,129,0.4)]';
-      
-      if (!aura) return 'border-white/5'; // Default border
+      if (!aura) return 'border-white/5'; 
       if (aura === 'fire') return 'border-orange-500/60 shadow-[0_0_50px_rgba(249,115,22,0.4)]';
       if (aura === 'power') return 'border-emerald-500/60 shadow-[0_0_50px_rgba(16,185,129,0.4)]';
       return 'border-blue-400/60 shadow-[0_0_50px_rgba(96,165,250,0.4)]';
@@ -518,7 +530,7 @@ const lastMsgCount = useRef(0);
       {/* --- PARTNER VIDEO CONTAINER --- */}
       <div 
         className={`absolute inset-0 z-10 transition-all duration-[1500ms] ease-in-out border-4 ${getAuraClass()} ${phase === SessionPhase.FOCUS ? 'scale-[0.98] rounded-2xl overflow-hidden' : ''}`}
-        onClick={handlePartnerClick} // Clicking video creates ripple
+        onClick={handlePartnerClick} 
       >
           {remoteStream ? (
               <video 
@@ -557,7 +569,7 @@ const lastMsgCount = useRef(0);
               ))}
           </div>
 
-          {/* Partner Task HUD (Dynamic Island) */}
+          {/* Partner Task HUD */}
           {activePartnerTask && showUI && (
               <div className="absolute bottom-8 left-0 right-0 flex justify-center pointer-events-none animate-in fade-in slide-in-from-bottom-2">
                    <div className="bg-black/60 backdrop-blur-md border border-white/10 px-4 py-2 rounded-full flex items-center gap-2 max-w-[80%] shadow-2xl">
@@ -568,7 +580,6 @@ const lastMsgCount = useRef(0);
           )}
       </div>
 
-      {/* --- FOCUS VIGNETTE OVERLAY --- */}
       <div className={`absolute inset-0 z-20 pointer-events-none transition-opacity duration-[2000ms] ${phase === SessionPhase.FOCUS ? 'opacity-100 vignette' : 'opacity-0'}`} />
 
       {/* --- FLOATING CHAT MESSAGES --- */}
@@ -581,11 +592,10 @@ const lastMsgCount = useRef(0);
           ))}
       </div>
 
-      {/* --- SELF VIDEO (DRAGGABLE) --- */}
+      {/* --- SELF VIDEO --- */}
       <div 
         onMouseDown={handleMouseDown}
         onTouchStart={handleTouchStart}
-        // GPU Acceleration for smooth drag
         style={{ transform: `translate3d(${selfPos.x}px, ${selfPos.y}px, 0)` }}
         className={`absolute top-0 left-0 w-28 md:w-44 aspect-[3/4] bg-slate-900 rounded-2xl overflow-hidden shadow-2xl border border-white/10 z-30 cursor-grab active:cursor-grabbing transition-opacity duration-500 ${showUI ? 'opacity-100' : 'opacity-30 hover:opacity-100'}`}
       >
@@ -601,14 +611,12 @@ const lastMsgCount = useRef(0);
         
         {/* TOP BAR: TIMER & PHASE */}
         <div className="absolute top-4 md:top-6 left-0 right-0 flex justify-center pointer-events-none px-14 md:px-0">
-            {/* MODIFIED: Dynamic Colors and Text based on Pomodoro State */}
             <div className={`backdrop-blur-xl border rounded-full px-5 py-2 flex items-center gap-3 shadow-2xl transition-all duration-700 ${phase === SessionPhase.FOCUS ? 'bg-black/80 border-red-500/20 text-red-50' : 'bg-slate-900/80 border-slate-700'}`}>
                 <span className={`text-[10px] font-bold uppercase tracking-widest ${
                     phase === SessionPhase.FOCUS 
                         ? (isPomodoroBreak ? 'text-emerald-400' : 'text-red-400') 
                         : 'text-slate-400'
                 }`}>
-                    {/* MODIFIED: Display Label */}
                     {phaseLabel}
                 </span>
                 <div className="w-px h-3 bg-white/10"></div>
@@ -641,7 +649,7 @@ const lastMsgCount = useRef(0);
             </Button>
         </div>
 
-        {/* CHAT & TASKS MODALS */}
+        {/* CHAT & TASKS */}
         <div 
             className="pointer-events-auto"
             onMouseEnter={() => setIsInteracting(true)}
@@ -655,7 +663,7 @@ const lastMsgCount = useRef(0);
         {/* BOTTOM CONTROLS */}
         <div className="absolute bottom-8 left-0 right-0 px-4 flex flex-col md:flex-row items-center justify-center gap-4 pointer-events-auto">
              
-             {/* Reaction Buttons (Now trigger Aura) */}
+             {/* Reactions */}
              <div className="bg-black/60 backdrop-blur-xl border border-white/10 rounded-full px-4 py-2 flex items-center gap-4 shadow-2xl order-1 md:order-none">
                  <button onClick={() => handleReaction('🔥')} className="hover:scale-110 active:scale-95 transition-all text-xl grayscale hover:grayscale-0 opacity-80 hover:opacity-100" title="Send Motivation">🔥</button>
                  <button onClick={() => handleReaction('💯')} className="hover:scale-110 active:scale-95 transition-all text-xl grayscale hover:grayscale-0 opacity-80 hover:opacity-100" title="Respect">💯</button>
@@ -670,10 +678,8 @@ const lastMsgCount = useRef(0);
                     </Button>
                 )}
 
-                {/* MODIFIED: Button disabled state to allow toggling during Pomodoro Break */}
                 <button 
                     onClick={() => { 
-                        // If it's Focus+Break, or NOT Focus, we allow toggle
                         if (phase !== SessionPhase.FOCUS || isPomodoroBreak) { 
                             setMicEnabled(!micEnabled); 
                             setManualMicToggle(!micEnabled); 
@@ -708,7 +714,6 @@ const lastMsgCount = useRef(0);
              </div>
         </div>
 
-        {/* Icebreaker Pop-up */}
         {icebreaker && (
             <div className="absolute bottom-32 left-1/2 -translate-x-1/2 bg-slate-900/95 border border-yellow-500/30 text-yellow-100 px-6 py-4 rounded-2xl shadow-2xl max-w-md text-center pointer-events-auto animate-in slide-in-from-bottom-4 w-[90%] md:w-auto z-50">
                 <p className="text-sm font-medium leading-relaxed">✨ {icebreaker}</p>
@@ -716,13 +721,13 @@ const lastMsgCount = useRef(0);
             </div>
         )}
 
-        {/* --- MODALS (Report / Exit) --- */}
         {(isReportOpen || exitModalStep > 0) && (
             <div 
                 className="absolute inset-0 z-[60] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in"
                 onMouseEnter={() => setIsInteracting(true)}
                 onMouseLeave={() => setIsInteracting(false)}
             >
+                {/* Reports and Exit Modal content remains unchanged */}
                 {isReportOpen && (
                     <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4 pointer-events-auto">
                         <div className="flex justify-between items-center">

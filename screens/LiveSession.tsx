@@ -10,7 +10,7 @@ import { useChat } from '../hooks/useChat';
 import { useWebRTC } from '../hooks/useWebRTC'; 
 import { db } from '../utils/firebaseConfig';
 import { collection, query, where, updateDoc, doc, addDoc, onSnapshot, deleteDoc, serverTimestamp, increment } from 'firebase/firestore';
-
+import { GameOverlay, GameState } from '../components/GameOverlay';
 interface LiveSessionProps {
   user: User;
   partner: Partner;
@@ -213,42 +213,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             }
         }
 
-        // --- FIXED SYNC LOGIC ---
-        // Calculate remaining time based on Server Start Time
-        if (data.phaseStartTime) {
-            const now = Date.now();
-            const elapsedSeconds = Math.floor((now - data.phaseStartTime) / 1000);
-            
-            let totalDurationForPhase = 0;
-            if (data.phase === SessionPhase.ICEBREAKER) totalDurationForPhase = isTest ? 30 : config.preTalkMinutes * 60;
-            else if (data.phase === SessionPhase.FOCUS) totalDurationForPhase = isTest ? 30 : (config.duration - config.preTalkMinutes - config.postTalkMinutes) * 60;
-            else if (data.phase === SessionPhase.DEBRIEF) totalDurationForPhase = isTest ? 30 : config.postTalkMinutes * 60;
-            
-            const exactTimeLeft = Math.max(0, totalDurationForPhase - elapsedSeconds);
-            
-            // Only update if difference is significant (drift > 2 seconds) to avoid jitter
-            // OR if we are initializing (timeLeft matches default)
-            setTimeLeft(prev => {
-                if (Math.abs(prev - exactTimeLeft) > 2) return exactTimeLeft;
-                return prev;
-            });
-        }
-
-        // Reactions
-        if (data.lastReaction && data.lastReaction.senderId !== user.id) {
-            if (Date.now() - data.lastReaction.timestamp < 2000) {
-                triggerAura(data.lastReaction.emoji);
-            }
-        }
-
-        if ((data.status === 'completed' || data.status === 'aborted') && data.abortedBy && data.abortedBy !== user.id) {
-            alert("Partner ended the session.");
-            onEndSession();
-        }
-    });
-    return () => unsub();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, user.id, config, isTest]);
+     
 
   // --- 3. ZEN MODE / MOUSE HANDLING ---
   useEffect(() => {
@@ -605,7 +570,22 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
               {!micEnabled && <div className="bg-red-500/80 p-1 rounded-full"><MicOff size={10} className="text-white"/></div>}
           </div>
       </div>
-
+{/* --- GAME OVERLAY --- */}
+      {isGameOpen && (
+          <GameOverlay 
+            sessionId={sessionId}
+            userId={user.id}
+            partnerId={partner.id}
+            partnerName={partner.name}
+            gameState={gameState}
+            onUpdateGameState={async (newState) => {
+                await updateDoc(doc(db, 'sessions', sessionId), {
+                    gameState: { ...gameState, ...newState }
+                });
+            }}
+            onClose={() => setIsGameOpen(false)}
+          />
+      )}
       {/* --- MAIN UI LAYER --- */}
       <div className={`absolute inset-0 pointer-events-none z-40 transition-opacity duration-500 ${showUI ? 'opacity-100' : 'opacity-0'}`}>
         

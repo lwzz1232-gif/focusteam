@@ -1,13 +1,12 @@
 import React, { useEffect, useRef, useState, MouseEvent } from 'react';
 import { Logo } from '../components/Logo';
 import { 
-  ArrowRight, Check, Clock, Users, Zap, Shield, Play, 
+  ArrowRight, Check, Clock, Users, Zap, Play, 
   ChevronDown, Star, Activity, Lock, MousePointer2 
 } from 'lucide-react';
 
 // --- 1. CORE UTILITIES & ANIMATIONS ---
 
-// A hook to track mouse position for the "Spotlight" effect
 const useMousePosition = () => {
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   useEffect(() => {
@@ -20,8 +19,15 @@ const useMousePosition = () => {
   return mousePosition;
 };
 
-// Smooth Reveal Component
-const Reveal: React.FC<{ children: React.ReactNode; delay?: number; width?: string }> = ({ children, delay = 0, width = "fit-content" }) => {
+// IMPROVED REVEAL: Added 'center' prop to ensure wrappers align correctly
+interface RevealProps {
+  children: React.ReactNode;
+  delay?: number;
+  width?: string;
+  center?: boolean; // New prop to force centering
+}
+
+const Reveal: React.FC<RevealProps> = ({ children, delay = 0, width = "fit-content", center = false }) => {
   const [isVisible, setIsVisible] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -37,15 +43,24 @@ const Reveal: React.FC<{ children: React.ReactNode; delay?: number; width?: stri
   }, []);
 
   return (
-    <div ref={ref} style={{ width }} className={`relative overflow-hidden`}>
-      <div className={`transition-all duration-1000 cubic-bezier(0.17, 0.55, 0.55, 1) ${isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-12'}`} style={{ transitionDelay: `${delay}ms` }}>
+    <div 
+      ref={ref} 
+      style={{ width }} 
+      className={`relative overflow-hidden ${center ? 'mx-auto flex justify-center' : ''}`}
+    >
+      <div 
+        className={`transition-all duration-1000 cubic-bezier(0.17, 0.55, 0.55, 1) 
+        ${isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-12'} 
+        ${center ? 'w-full flex justify-center' : ''}`} 
+        style={{ transitionDelay: `${delay}ms` }}
+      >
         {children}
       </div>
     </div>
   );
 };
 
-// Spotlight Card Component (Glows on hover based on cursor)
+// Spotlight Card Component
 const SpotlightCard: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className = "" }) => {
   const divRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -77,12 +92,10 @@ const SpotlightCard: React.FC<{ children: React.ReactNode; className?: string }>
   );
 };
 
-// --- 2. SUB-COMPONENTS ---
-
 const StatBadge: React.FC<{ icon: React.ElementType; label: string; value: string }> = ({ icon: Icon, label, value }) => (
-  <div className="flex items-center gap-3 px-4 py-2 rounded-full bg-white/5 border border-white/10 backdrop-blur-md">
-    <Icon size={16} className="text-blue-400" />
-    <div className="flex flex-col leading-none">
+  <div className="flex items-center justify-center gap-3 px-4 py-3 rounded-full bg-white/5 border border-white/10 backdrop-blur-md w-full">
+    <Icon size={16} className="text-blue-400 shrink-0" />
+    <div className="flex flex-col leading-none text-left">
       <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">{label}</span>
       <span className="text-sm font-bold text-slate-100">{value}</span>
     </div>
@@ -99,7 +112,6 @@ interface LandingProps {
 export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
   const mouse = useMousePosition();
 
-  // CSS for background grid animation
   const gridStyle = {
     backgroundImage: `linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px)`,
     backgroundSize: '40px 40px',
@@ -111,16 +123,11 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
       
       {/* --- AMBIENT BACKGROUND --- */}
       <div className="fixed inset-0 pointer-events-none z-0">
-        {/* Moving Grid */}
         <div className="absolute inset-0" style={gridStyle}></div>
-        
-        {/* Mouse Follower Glow (Subtle) */}
         <div 
           className="absolute w-[800px] h-[800px] bg-blue-600/10 rounded-full blur-[120px] transition-transform duration-100 ease-out -translate-x-1/2 -translate-y-1/2"
           style={{ left: mouse.x, top: mouse.y }}
         />
-        
-        {/* Top Light */}
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-[500px] bg-gradient-to-b from-blue-900/10 via-transparent to-transparent blur-3xl" />
       </div>
 
@@ -149,18 +156,18 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
       {/* --- HERO SECTION --- */}
       <section className="relative z-10 pt-40 pb-20 px-6 min-h-screen flex flex-col items-center justify-center">
         
-        {/* Status Badge */}
-        <Reveal>
+        {/* Status Badge - Centered */}
+        <Reveal center width="100%">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-medium mb-8 animate-pulse">
             <span className="w-2 h-2 rounded-full bg-blue-400 shadow-[0_0_10px_currentColor]"></span>
             142 people focusing right now
           </div>
         </Reveal>
 
-        {/* Main Title */}
-        <div className="text-center max-w-5xl mx-auto space-y-6">
-          <Reveal delay={100}>
-            <h1 className="text-5xl md:text-8xl font-bold tracking-tight text-white leading-[1.1]">
+        {/* Main Title - Centered */}
+        <div className="text-center w-full max-w-5xl mx-auto space-y-6 flex flex-col items-center">
+          <Reveal delay={100} center width="100%">
+            <h1 className="text-5xl md:text-8xl font-bold tracking-tight text-white leading-[1.1] text-center">
               Don't work alone. <br />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-400">
                 Work Together.
@@ -168,19 +175,19 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
             </h1>
           </Reveal>
 
-          <Reveal delay={200}>
-            <p className="text-lg md:text-xl text-slate-400 max-w-2xl mx-auto leading-relaxed">
+          <Reveal delay={200} center width="100%">
+            <p className="text-lg md:text-xl text-slate-400 max-w-2xl mx-auto leading-relaxed text-center">
               Experience the quietest productivity community on earth. 
               We match you with a partner for 50 minutes of deep work. 
               <span className="text-slate-200"> Cameras on. Mics off. Zero distractions.</span>
             </p>
           </Reveal>
 
-          <Reveal delay={300}>
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mt-10">
+          <Reveal delay={300} center width="100%">
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mt-10 w-full">
               <button 
                 onClick={onGetStarted}
-                className="group relative h-14 px-8 rounded-full bg-blue-600 text-white font-bold text-lg overflow-hidden transition-all hover:scale-105 hover:shadow-[0_0_40px_-10px_rgba(37,99,235,0.5)]"
+                className="group relative h-14 px-8 rounded-full bg-blue-600 text-white font-bold text-lg overflow-hidden transition-all hover:scale-105 hover:shadow-[0_0_40px_-10px_rgba(37,99,235,0.5)] w-full sm:w-auto flex justify-center items-center"
               >
                 <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-100%] group-hover:animate-[shimmer_1.5s_infinite]"></div>
                 <div className="flex items-center gap-2">
@@ -191,7 +198,7 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
               
               <button 
                 onClick={() => document.getElementById('how-it-works')?.scrollIntoView({behavior: 'smooth'})}
-                className="h-14 px-8 rounded-full border border-slate-700 hover:bg-slate-800 text-slate-300 font-medium transition-all flex items-center gap-2"
+                className="h-14 px-8 rounded-full border border-slate-700 hover:bg-slate-800 text-slate-300 font-medium transition-all flex items-center justify-center gap-2 w-full sm:w-auto"
               >
                 <Play size={16} fill="currentColor" /> See how it works
               </button>
@@ -199,9 +206,9 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
           </Reveal>
         </div>
 
-        {/* Hero Visual Mockup */}
-        <Reveal delay={500} width="100%">
-          <div className="mt-20 relative max-w-4xl mx-auto">
+        {/* Hero Visual Mockup - Centered */}
+        <Reveal delay={500} width="100%" center>
+          <div className="mt-20 relative max-w-4xl mx-auto w-full">
              {/* Glow behind mockups */}
              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[120%] h-[120%] bg-blue-500/20 blur-[100px] rounded-full opacity-50"></div>
              
@@ -248,7 +255,7 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
 
       {/* --- STATS BAR --- */}
       <div className="border-y border-white/5 bg-white/[0.02] backdrop-blur-sm">
-        <div className="max-w-6xl mx-auto py-8 grid grid-cols-2 md:grid-cols-4 gap-8 px-6">
+        <div className="max-w-6xl mx-auto py-8 grid grid-cols-2 md:grid-cols-4 gap-4 px-6">
            <StatBadge icon={Users} label="Community" value="25k+ Members" />
            <StatBadge icon={Clock} label="Focus Time" value="1.2M Hours" />
            <StatBadge icon={Zap} label="Average Session" value="50 Minutes" />
@@ -259,10 +266,10 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
       {/* --- THE RITUAL (HOW IT WORKS) --- */}
       <section id="how-it-works" className="py-32 px-6 relative overflow-hidden">
         <div className="max-w-6xl mx-auto relative z-10">
-          <Reveal>
-            <div className="mb-20">
+          <Reveal width="100%">
+            <div className="mb-20 text-center md:text-left">
               <h2 className="text-4xl md:text-6xl font-bold text-white mb-6">The Ritual.</h2>
-              <p className="text-xl text-slate-400 max-w-xl">
+              <p className="text-xl text-slate-400 max-w-xl mx-auto md:mx-0">
                 We've stripped away the noise. No scheduling, no calendars, no small talk. 
                 Just pure flow state on demand.
               </p>
@@ -313,8 +320,8 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
       {/* --- PROBLEM/SOLUTION (Comparison) --- */}
       <section className="py-32 bg-slate-900/20 px-6 border-y border-white/5">
          <div className="max-w-5xl mx-auto">
-            <Reveal>
-              <div className="text-center mb-16">
+            <Reveal center width="100%">
+              <div className="text-center mb-16 w-full">
                  <h2 className="text-3xl md:text-5xl font-bold text-white mb-4">Why Body Doubling Works</h2>
                  <p className="text-slate-400">It's not magic. It's psychology.</p>
               </div>
@@ -322,8 +329,8 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
 
             <div className="grid md:grid-cols-2 gap-12">
                {/* The "Alone" State */}
-               <Reveal delay={100}>
-                 <div className="p-8 rounded-2xl bg-red-950/10 border border-red-900/20 relative overflow-hidden">
+               <Reveal delay={100} width="100%">
+                 <div className="h-full p-8 rounded-2xl bg-red-950/10 border border-red-900/20 relative overflow-hidden hover:border-red-900/40 transition-colors">
                     <div className="absolute top-0 right-0 p-4 opacity-10"><img src="https://cdn-icons-png.flaticon.com/512/564/564619.png" className="w-32 h-32 invert" alt="" /></div>
                     <h3 className="text-xl font-bold text-red-200 mb-4">Working Alone</h3>
                     <ul className="space-y-4 text-red-200/60">
@@ -336,8 +343,8 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
                </Reveal>
 
                {/* The "Together" State */}
-               <Reveal delay={300}>
-                 <div className="p-8 rounded-2xl bg-blue-950/20 border border-blue-500/30 relative overflow-hidden">
+               <Reveal delay={300} width="100%">
+                 <div className="h-full p-8 rounded-2xl bg-blue-950/20 border border-blue-500/30 relative overflow-hidden hover:border-blue-500/50 transition-colors">
                     <div className="absolute top-0 right-0 p-4 opacity-10"><Users size={120} className="text-blue-400" /></div>
                     <h3 className="text-xl font-bold text-blue-200 mb-4 flex items-center gap-2">
                        With FocusTwin <Check size={18} className="text-blue-400" />
@@ -356,25 +363,27 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
 
       {/* --- FAQ SECTION --- */}
       <section className="py-24 px-6 max-w-3xl mx-auto">
-        <Reveal>
-          <h2 className="text-3xl font-bold text-white mb-10 text-center">Frequently Asked Questions</h2>
-          <div className="space-y-4">
-             {[
-               { q: "Do I have to talk to my partner?", a: "Barely. You say hello, state your goal, and mute. The goal is silence." },
-               { q: "Is video mandatory?", a: "Yes. Being seen is what creates the accountability. We do not record anything." },
-               { q: "Is it free?", a: "Yes, FocusTwin is currently 100% free for our beta community." },
-               { q: "What happens if my partner leaves?", a: "We'll notify you instantly and give you the option to re-match." }
-             ].map((faq, i) => (
-               <div key={i} className="group border border-white/5 rounded-lg bg-white/[0.02] hover:bg-white/[0.05] transition-colors">
-                 <details className="p-6 cursor-pointer">
-                   <summary className="font-medium text-slate-200 flex justify-between items-center list-none">
-                     {faq.q}
-                     <ChevronDown className="group-open:rotate-180 transition-transform text-slate-500" />
-                   </summary>
-                   <p className="mt-4 text-slate-400 leading-relaxed text-sm">{faq.a}</p>
-                 </details>
-               </div>
-             ))}
+        <Reveal center width="100%">
+          <div className="w-full">
+            <h2 className="text-3xl font-bold text-white mb-10 text-center">Frequently Asked Questions</h2>
+            <div className="space-y-4">
+               {[
+                 { q: "Do I have to talk to my partner?", a: "Barely. You say hello, state your goal, and mute. The goal is silence." },
+                 { q: "Is video mandatory?", a: "Yes. Being seen is what creates the accountability. We do not record anything." },
+                 { q: "Is it free?", a: "Yes, FocusTwin is currently 100% free for our beta community." },
+                 { q: "What happens if my partner leaves?", a: "We'll notify you instantly and give you the option to re-match." }
+               ].map((faq, i) => (
+                 <div key={i} className="group border border-white/5 rounded-lg bg-white/[0.02] hover:bg-white/[0.05] transition-colors">
+                   <details className="p-6 cursor-pointer">
+                     <summary className="font-medium text-slate-200 flex justify-between items-center list-none select-none">
+                       {faq.q}
+                       <ChevronDown className="group-open:rotate-180 transition-transform text-slate-500" />
+                     </summary>
+                     <p className="mt-4 text-slate-400 leading-relaxed text-sm">{faq.a}</p>
+                   </details>
+                 </div>
+               ))}
+            </div>
           </div>
         </Reveal>
       </section>
@@ -384,8 +393,8 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
          {/* Background Aurora */}
          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[500px] bg-gradient-to-r from-blue-600/20 to-purple-600/20 blur-[120px] rounded-full pointer-events-none"></div>
 
-         <Reveal>
-            <div className="relative z-10">
+         <Reveal center width="100%">
+            <div className="relative z-10 flex flex-col items-center justify-center">
                <h2 className="text-5xl md:text-7xl font-bold text-white mb-8 tracking-tight">
                  Your best work is <br/> 
                  <span className="italic font-serif text-blue-400">waiting for you.</span>

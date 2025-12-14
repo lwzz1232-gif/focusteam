@@ -8,12 +8,27 @@ import { Lock, Mail, User as UserIcon, AlertCircle, CheckCircle2, Chrome, FileTe
 import { AuthMascot } from '../components/AuthMascot';
 import { Logo } from '../components/Logo';
 
+// PASTE THIS RIGHT AFTER YOUR IMPORTS
+const useMousePosition = () => {
+  const [mousePosition, setMousePosition] = React.useState({ x: 0, y: 0 });
+  React.useEffect(() => {
+    const updateMousePosition = (ev: any) => {
+      setMousePosition({ x: ev.clientX, y: ev.clientY });
+    };
+    window.addEventListener('mousemove', updateMousePosition);
+    return () => window.removeEventListener('mousemove', updateMousePosition);
+  }, []);
+  return mousePosition;
+};
+
 interface LoginProps {
   onLogin: (user: User) => void;
   onBack: () => void; 
 }
 
+
 export const Login: React.FC<LoginProps> = ({ onLogin, onBack }) => {
+  const mouse = useMousePosition();
   const [isSignup, setIsSignup] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -297,7 +312,24 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onBack }) => {
   }
 
   return (
-    <div className="flex-1 flex items-center justify-center p-4">
+    <div className="flex-1 flex items-center justify-center p-4 relative overflow-hidden">
+      
+      {/* --- START COOL BACKGROUND --- */}
+      <div className="fixed inset-0 pointer-events-none z-0">
+        <div className="absolute inset-0 bg-[#05050A]"></div>
+        <div className="absolute inset-0 opacity-20" 
+             style={{
+                backgroundImage: `linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px)`,
+                backgroundSize: '60px 60px',
+                maskImage: 'radial-gradient(ellipse at center, black 40%, transparent 100%)'
+             }}>
+        </div>
+        <div 
+          className="absolute w-[600px] h-[600px] bg-indigo-600/15 rounded-full blur-[100px] -translate-x-1/2 -translate-y-1/2 transition-transform duration-75"
+          style={{ left: mouse.x, top: mouse.y }}
+        />
+      </div>
+      {/* --- END COOL BACKGROUND --- */}
       {/* RENDER TERMS MODAL IF OPEN */}
       {showTermsModal && <TermsModal />}
 

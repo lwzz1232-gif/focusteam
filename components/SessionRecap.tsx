@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Download, X, Share2, Music, Search, Zap, Flower2 } from 'lucide-react';
+import { Download, X, Share2, Music, Search, Zap, Flower2, CloudSun, Box } from 'lucide-react';
 import { User, Partner, TodoItem } from '../types';
+import * as THREE from 'three';
 
 interface SessionRecapProps {
   user: User;
@@ -10,7 +11,7 @@ interface SessionRecapProps {
   onClose: () => void;
 }
 
-type Theme = 'NOIR' | 'NEON' | 'ZEN' | 'AURA';
+type Theme = 'NOIR' | 'NEON' | 'ZEN' | 'AURA' | 'GHIBLI' | 'QUANTUM';
 
 export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, duration, tasks, onClose }) => {
   // --- STATE ---
@@ -29,7 +30,7 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
   // --- 2. GENERATE LIVE PREVIEW ---
   useEffect(() => {
     const timer = setTimeout(() => {
-      generateCanvas().then(canvas => {
+      ().then(canvas => {
         if (canvas) setPreviewUrl(canvas.toDataURL());
       });
     }, 100);
@@ -37,7 +38,7 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
   }, [currentTheme, neonVariant, user, partner, duration, completedCount]);
 
   // --- CANVAS GENERATOR ---
-  const generateCanvas = async (): Promise<HTMLCanvasElement | null> => {
+  const  = async (): Promise<HTMLCanvasElement | null> => {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
@@ -53,13 +54,16 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
     else if (currentTheme === 'ZEN') drawZenTheme(ctx);
     else if (currentTheme === 'AURA') drawAuraTheme(ctx);
     else drawNeonTheme(ctx); // Calls the router
-
+     else if (currentTheme === 'AURA') drawAuraTheme(ctx);
+    else if (currentTheme === 'GHIBLI') drawGhibliTheme(ctx); // ADD THIS
+    else if (currentTheme === 'QUANTUM') await drawQuantumTheme(ctx); // ADD THIS (Note the await)
+    else drawNeonTheme(ctx); 
     return canvas;
   };
 
   // --- HANDLERS ---
   const handleDownload = async () => {
-    const canvas = await generateCanvas();
+    const canvas = await ();
     if (!canvas) return;
 
     const link = document.createElement('a');
@@ -72,7 +76,7 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
 
   const handleShare = async () => {
     setIsSharing(true);
-    const canvas = await generateCanvas();
+    const canvas = await ();
     if (!canvas) { setIsSharing(false); return; }
 
     canvas.toBlob(async (blob) => {
@@ -194,6 +198,177 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
     ctx.textAlign = 'center'; ctx.font = 'bold 40px Inter, sans-serif'; ctx.fillStyle = 'rgba(255, 255, 255, 0.5)'; ctx.fillText('FocusTwin Wrapped', 540, 1750);
   };
 
+// --- THEME 5: GHIBLI (Anime Aesthetic) ---
+  const drawGhibliTheme = (ctx: CanvasRenderingContext2D) => {
+    // 1. Anime Sky Gradient
+    const sky = ctx.createLinearGradient(0, 0, 0, 1920);
+    sky.addColorStop(0, '#3b82f6'); // Deep Blue
+    sky.addColorStop(0.6, '#93c5fd'); // Light Blue
+    sky.addColorStop(1, '#e0f2fe'); // White-ish horizon
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, 1080, 1920);
+
+    // 2. Procedural Fluffy Clouds
+    const drawCloud = (cx: number, cy: number, scale: number) => {
+        ctx.fillStyle = '#ffffff';
+        ctx.shadowColor = 'rgba(255,255,255,0.8)';
+        ctx.shadowBlur = 20;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 60 * scale, 0, Math.PI * 2);
+        ctx.arc(cx + 50 * scale, cy - 20 * scale, 70 * scale, 0, Math.PI * 2);
+        ctx.arc(cx + 90 * scale, cy, 60 * scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+    };
+    
+    // Draw background clouds
+    drawCloud(200, 400, 1.5);
+    drawCloud(800, 600, 2.0);
+    drawCloud(500, 200, 1.2);
+
+    // 3. Grassy Hill
+    ctx.fillStyle = '#4ade80'; // Bright Anime Green
+    ctx.beginPath();
+    ctx.moveTo(0, 1920);
+    ctx.lineTo(0, 1400);
+    ctx.bezierCurveTo(300, 1350, 700, 1250, 1080, 1450); // Rolling hill curve
+    ctx.lineTo(1080, 1920);
+    ctx.fill();
+    
+    // Hill Shadow/Texture
+    ctx.fillStyle = 'rgba(21, 128, 61, 0.1)';
+    ctx.fillRect(0, 1400, 1080, 520);
+
+    // 4. "Soot Sprites" (Little cute black dots)
+    const drawSoot = (x: number, y: number) => {
+        ctx.fillStyle = '#111';
+        ctx.beginPath(); ctx.arc(x, y, 20, 0, Math.PI*2); ctx.fill(); // Body
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(x-5, y-5, 6, 0, Math.PI*2); ctx.fill(); // Left Eye
+        ctx.beginPath(); ctx.arc(x+5, y-5, 6, 0, Math.PI*2); ctx.fill(); // Right Eye
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(x-5, y-5, 2, 0, Math.PI*2); ctx.fill(); // Pupil
+        ctx.beginPath(); ctx.arc(x+5, y-5, 2, 0, Math.PI*2); ctx.fill(); // Pupil
+    };
+    drawSoot(200, 1500); drawSoot(230, 1480); drawSoot(260, 1510);
+    
+    // 5. Typography
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#1e3a8a';
+    ctx.font = 'bold 60px serif'; 
+    ctx.fillText("The Wind Rises...", 540, 300);
+    
+    ctx.fillStyle = '#fff';
+    ctx.font = '900 300px serif';
+    ctx.shadowColor = 'rgba(0,0,0,0.1)'; ctx.shadowOffsetX = 10; ctx.shadowOffsetY = 10;
+    ctx.fillText(`${Math.round(duration)}`, 540, 900);
+    ctx.shadowColor = 'transparent';
+    
+    ctx.font = 'italic 50px serif';
+    ctx.fillStyle = '#1e3a8a';
+    ctx.fillText("minutes of journey", 540, 1000);
+
+    // Card Info
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+    ctx.roundRect(140, 1100, 800, 200, 20);
+    ctx.fill();
+    
+    ctx.fillStyle = '#1e3a8a';
+    ctx.font = '40px sans-serif';
+    ctx.fillText(`Traveler: ${user.name}`, 540, 1180);
+    ctx.fillText(`Companion: ${partner.name}`, 540, 1240);
+  };
+// --- THEME 6: QUANTUM (Three.js 3D Render) ---
+  const drawQuantumTheme = async (ctx: CanvasRenderingContext2D) => {
+    // 1. Background
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, 1080, 1920);
+
+    // 2. Setup Temporary Three.js Scene
+    const width = 1080; 
+    const height = 1920;
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
+    camera.position.z = 5;
+
+    const renderer = new THREE.WebGLRenderer({ alpha: true, preserveDrawingBuffer: true });
+    renderer.setSize(width, height);
+
+    // 3. Create 3D Object (Icosahedron Wireframe)
+    const geometry = new THREE.IcosahedronGeometry(2.5, 1);
+    const material = new THREE.MeshBasicMaterial({ 
+        color: 0x00ffff, 
+        wireframe: true, 
+        transparent: true, 
+        opacity: 0.8 
+    });
+    const sphere = new THREE.Mesh(geometry, material);
+    scene.add(sphere);
+
+    // Inner glowing core
+    const coreGeo = new THREE.IcosahedronGeometry(1.5, 0);
+    const coreMat = new THREE.MeshBasicMaterial({ color: 0xff00ff, wireframe: true });
+    const core = new THREE.Mesh(coreGeo, coreMat);
+    scene.add(core);
+
+    // Particles
+    const particlesGeo = new THREE.BufferGeometry();
+    const particleCount = 200;
+    const posArray = new Float32Array(particleCount * 3);
+    for(let i = 0; i < particleCount * 3; i++) {
+        posArray[i] = (Math.random() - 0.5) * 15;
+    }
+    particlesGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+    const particlesMat = new THREE.PointsMaterial({ size: 0.05, color: 0xffffff });
+    const particlesMesh = new THREE.Points(particlesGeo, particlesMat);
+    scene.add(particlesMesh);
+
+    // 4. Random Rotation based on duration (so it's unique every time)
+    sphere.rotation.x = Math.random() * Math.PI;
+    sphere.rotation.y = Math.random() * Math.PI;
+    core.rotation.x = -sphere.rotation.x;
+
+    // 5. Render to Image
+    renderer.render(scene, camera);
+    const dataURL = renderer.domElement.toDataURL('image/png');
+    
+    // 6. Draw 3D Image onto 2D Canvas
+    const img = new Image();
+    img.src = dataURL;
+    await new Promise(r => { img.onload = r; });
+    ctx.drawImage(img, 0, 0);
+
+    // Cleanup Three.js
+    renderer.dispose();
+    geometry.dispose();
+    material.dispose();
+
+    // 7. Overlay HUD Text (Cyberpunk Style)
+    ctx.font = 'bold 100px "Courier New", monospace';
+    ctx.fillStyle = '#00ffff';
+    ctx.textAlign = 'center';
+    ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 20;
+    ctx.fillText("QUANTUM SYNC", 540, 300);
+    
+    ctx.font = 'bold 300px sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = '#ff00ff'; ctx.shadowBlur = 40;
+    ctx.fillText(`${Math.round(duration)}`, 540, 950);
+    
+    ctx.shadowBlur = 0;
+    ctx.font = '40px "Courier New", monospace';
+    ctx.fillStyle = '#00ffff';
+    ctx.fillText(`// PROTOCOL: COMPLETE`, 540, 1100);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(`USER: ${user.name}`, 540, 1600);
+    ctx.fillText(`LINK: ${partner.name}`, 540, 1660);
+    
+    // Draw Border
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 5;
+    ctx.strokeRect(50, 50, 980, 1820);
+  };
+  
   const drawRoundedRect = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) => {
     if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); return; }
     ctx.beginPath(); ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r); ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h); ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r); ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
@@ -205,6 +380,8 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
         case 'NOIR': return { bg: 'bg-zinc-950', accent: 'text-white', ring: 'ring-zinc-500', button: 'bg-white text-black' };
         case 'ZEN':  return { bg: 'bg-[#e5e0d5]', accent: 'text-stone-800', ring: 'ring-stone-400', button: 'bg-stone-800 text-[#e5e0d5]' };
         case 'AURA': return { bg: 'bg-pink-950', accent: 'text-pink-200', ring: 'ring-pink-400', button: 'bg-pink-500 text-white' };
+        case 'GHIBLI': return { bg: 'bg-sky-200', accent: 'text-blue-600', ring: 'ring-blue-400', button: 'bg-blue-500 text-white' };
+        case 'QUANTUM': return { bg: 'bg-black', accent: 'text-cyan-400', ring: 'ring-cyan-400', button: 'bg-cyan-600 text-black' };
         default:     return { bg: 'bg-slate-950', accent: 'text-cyan-400', ring: 'ring-purple-500', button: 'bg-cyan-400 text-black' };
     }
   };
@@ -236,6 +413,8 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
                 { id: 'NEON', icon: <Zap size={16}/>, label: 'Neon' },
                 { id: 'ZEN', icon: <Flower2 size={16}/>, label: 'Zen' },
                 { id: 'AURA', icon: <Music size={16}/>, label: 'Aura' },
+                { id: 'GHIBLI', icon: <CloudSun size={16}/>, label: 'Ghibli' },
+                { id: 'QUANTUM', icon: <Box size={16}/>, label: '3D' },
             ].map((t) => (
                 <button
                     key={t.id}

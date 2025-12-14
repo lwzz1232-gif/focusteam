@@ -3,9 +3,10 @@ import { Logo } from '../components/Logo';
 
 interface LandingProps {
   onGetStarted: () => void;
+  onSignIn: () => void;
 }
 
-export const Landing: React.FC<LandingProps> = ({ onGetStarted }) => {
+export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
   return (
     <div className="flex-1 flex flex-col bg-slate-950 text-slate-100 overflow-y-auto">
       
@@ -22,7 +23,7 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted }) => {
           <span className="font-bold text-lg tracking-tight">FocusTwin</span>
         </div>
         <button 
-          onClick={onGetStarted}
+          onClick={onSignIn}
           className="text-sm text-slate-400 hover:text-white transition-colors"
         >
           Sign in

@@ -205,7 +205,12 @@ const handleEndSession = () => {
     >
       {currentScreen === Screen.SPLASH && <Splash onComplete={handleSplashComplete} />}
 
-      {currentScreen === Screen.LOGIN && <Login onLogin={() => {}} />}
+      {currentScreen === Screen.LOGIN && (
+  <Login 
+    onLogin={() => {}} 
+    onBack={() => setCurrentScreen(Screen.LANDING)} 
+  />
+)}
 
       {currentScreen === Screen.DASHBOARD && user && (
         <Dashboard 

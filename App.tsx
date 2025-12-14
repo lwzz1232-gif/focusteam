@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Layout } from './components/Layout';
 import { Splash } from './screens/Splash';
 import { Login } from './screens/Login';
+import { Landing } from './screens/Landing';
 import { Dashboard } from './screens/Dashboard';
 import { Matching } from './screens/Matching';
 import { Negotiation } from './screens/Negotiation';

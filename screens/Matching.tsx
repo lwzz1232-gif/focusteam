@@ -6,8 +6,7 @@ import { db } from '../utils/firebaseConfig';
 import { doc, onSnapshot, collection, addDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import Globe from 'react-globe.gl';
 
-// --- DATA GENERATOR FOR THE GLOBE ---
-// Generates random connection arcs to make the globe look alive
+// --- UPGRADE: BRIGHTER NEON ARCS ---
 const N_ARCS = 20;
 const genRandomArcs = () => {
   return [...Array(N_ARCS).keys()].map(() => ({
@@ -15,7 +14,8 @@ const genRandomArcs = () => {
     startLng: (Math.random() - 0.5) * 360,
     endLat: (Math.random() - 0.5) * 180,
     endLng: (Math.random() - 0.5) * 360,
-    color: ['#06b6d4', '#3b82f6'][Math.round(Math.random())] // Cyan or Blue
+    // Brighter Colors: Cyan and Hot Pink
+    color: ['#22d3ee', '#f472b6'][Math.round(Math.random())] 
   }));
 };
 
@@ -38,19 +38,16 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
   const arcsData = useMemo(() => genRandomArcs(), []);
   const [windowSize, setWindowSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
-  // Handle Resize for the 3D Canvas
   useEffect(() => {
     const handleResize = () => setWindowSize({ w: window.innerWidth, h: window.innerHeight });
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Use the matchmaking hook
   const { status, joinQueue, cancelSearch, error } = useMatchmaking(user, (partner, sessionId) => {
     setSessionIdToWatch(sessionId);
   });
 
-  // Start the queue join on mount
   useEffect(() => {
     joinQueue(config);
     return () => {
@@ -86,7 +83,7 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
     return () => { clearTimeout(timeoutId); isActive = false; };
   }, [status, sessionIdToWatch, user, config, isInLobby]);
 
-  // Listen to session document
+  // Session Listener
   useEffect(() => {
     if (!sessionIdToWatch || hasCalledOnMatch) return;
     const sessionRef = doc(collection(db, 'sessions'), sessionIdToWatch);
@@ -106,7 +103,7 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
     return () => unsubscribe();
   }, [sessionIdToWatch, user.id, onMatched, hasCalledOnMatch]);
 
-  // Status Text Rotation
+  // Text Rotation
   useEffect(() => {
     if (isInLobby) { setStatusText("Broadcasting to Public Lobby..."); return; }
     if (status === 'SEARCHING') {
@@ -117,11 +114,13 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
     } else if (status === 'MATCHED') { setStatusText("Connection Locked."); }
   }, [status, config, isInLobby]);
 
-  // Auto-rotate the globe
+  // --- UPGRADE: FASTER ROTATION & ZOOM ---
   useEffect(() => {
     if (globeEl.current) {
       globeEl.current.controls().autoRotate = true;
-      globeEl.current.controls().autoRotateSpeed = 1.2;
+      globeEl.current.controls().autoRotateSpeed = 0.8; // Slightly slower for grandeur
+      // Set initial zoom level (lower Y = closer)
+      globeEl.current.pointOfView({ lat: 20, lng: 0, altitude: 2.0 }); 
     }
   }, []);
 
@@ -130,30 +129,37 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
   return (
     <div className="flex-1 flex flex-col items-center justify-center bg-black relative overflow-hidden h-full">
       
-      {/* --- THE 3D GLOBE BACKGROUND --- */}
-      <div className="absolute inset-0 z-0 opacity-80">
+      {/* --- 3D GLOBE (UPGRADED) --- */}
+      <div className="absolute inset-0 z-0 opacity-100 transition-opacity duration-1000">
         <Globe
           ref={globeEl}
           width={windowSize.w}
           height={windowSize.h}
-          globeImageUrl="//unpkg.com/three-globe/example/img/earth-dark.jpg"
-          bumpImageUrl="//unpkg.com/three-globe/example/img/earth-topology.png"
+          // Night Texture (City Lights)
+          globeImageUrl="//unpkg.com/three-globe/example/img/earth-night.jpg"
+          // Background Stars (Adds depth!)
+          backgroundImageUrl="//unpkg.com/three-globe/example/img/night-sky.png"
           backgroundColor="#000000"
-          atmosphereColor="#3b82f6"
-          atmosphereAltitude={0.25}
+          
+          // ATMOSPHERE (The "Electric" Glow)
+          showAtmosphere={true}
+          atmosphereColor="#7dd3fc" // Bright Sky Blue
+          atmosphereAltitude={0.2}  // Thicker glow
+          
+          // BEAMS (Lasers)
           arcsData={arcsData}
           arcColor="color"
-          arcDashLength={0.4}
-          arcDashGap={4}
-          arcDashInitialGap={() => Math.random() * 5}
-          arcDashAnimateTime={1000}
-          arcStroke={0.5}
+          arcDashLength={0.5}
+          arcDashGap={2}
+          arcDashAnimateTime={1500}
+          arcStroke={0.8} // Thicker lines
         />
-        {/* Vignette Overlay to fade edges to black */}
-        <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_10%,black_90%)]"></div>
+        
+        {/* Subtle vignette to blend edges */}
+        <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_30%,black_100%)]"></div>
       </div>
 
-      {/* --- FOREGROUND UI --- */}
+      {/* --- UI --- */}
       {error ? (
         <div className="relative z-20 max-w-md w-full bg-red-950/80 border border-red-500/50 rounded-xl p-6 text-center backdrop-blur-md">
           <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4"><AlertTriangle size={32} className="text-red-500" /></div>
@@ -166,8 +172,7 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
         <div className="relative z-20 flex flex-col items-center w-full max-w-xl pointer-events-none select-none mt-32">
           
           <div className="text-center space-y-4">
-             {/* Mode Badge */}
-             <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-blue-500/30 bg-blue-500/10 backdrop-blur-md">
+             <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-blue-500/30 bg-blue-500/10 backdrop-blur-md shadow-[0_0_15px_rgba(59,130,246,0.5)]">
                 {isInLobby ? <Wifi size={14} className="text-emerald-400 animate-pulse"/> : <div className="w-2 h-2 bg-blue-400 rounded-full animate-ping"/>}
                 <span className={`text-xs font-bold uppercase tracking-widest ${isInLobby ? 'text-emerald-400' : 'text-blue-400'}`}>
                     {isInLobby ? "Lobby Active" : "Scanning"}
@@ -183,7 +188,6 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
              </p>
           </div>
 
-          {/* Cancel Button */}
           <div className="mt-20 pointer-events-auto">
             <button
                 onClick={() => { cancelSearch(); onCancel(); }}

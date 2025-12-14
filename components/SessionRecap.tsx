@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from './Button';
 import { Download, X, Share2, Music, Search, Zap, Flower2, Check } from 'lucide-react';
 import { User, Partner, TodoItem } from '../types';
@@ -16,6 +16,7 @@ type Theme = 'NOIR' | 'NEON' | 'ZEN' | 'AURA';
 export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, duration, tasks, onClose }) => {
   const [currentTheme, setCurrentTheme] = useState<Theme>('NEON');
   const [isSharing, setIsSharing] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string>('');
   const completedCount = tasks.filter(t => t.completed).length;
 
   // --- CANVAS LOGIC (UNTOUCHED) ---
@@ -151,6 +152,16 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
         default:     return { bg: 'bg-slate-950', accent: 'text-cyan-400', ring: 'ring-purple-500', button: 'bg-cyan-400 text-black' };
     }
   };
+  // --- NEW: GENERATE LIVE PREVIEW ---
+  useEffect(() => {
+    // Small delay to ensure fonts/canvas are ready
+    const timer = setTimeout(() => {
+      generateCanvas().then(canvas => {
+        if (canvas) setPreviewUrl(canvas.toDataURL());
+      });
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [currentTheme, user, partner, duration, completedCount]);
   const themeStyle = getThemeStyles();
 
   return (
@@ -164,22 +175,21 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
         <X size={24} />
       </button>
 
-      {/* 2. THE MAIN CARD */}
-      <div className={`
-        relative w-full max-w-[360px] aspect-[9/16] rounded-3xl shadow-2xl overflow-hidden transition-all duration-500 mb-8 border-4 border-white/10
-        ${currentTheme === 'NOIR' ? 'bg-zinc-950 grayscale' : ''}
-        ${currentTheme === 'NEON' ? 'bg-gradient-to-br from-slate-900 via-indigo-950 to-purple-950' : ''}
-        ${currentTheme === 'ZEN' ? 'bg-[#f4f1ea]' : ''}
-        ${currentTheme === 'AURA' ? 'bg-gradient-to-tr from-pink-300 via-purple-300 to-indigo-300' : ''}
-        animate-in zoom-in-95 duration-500
-      `}>
-         {/* Live Preview (Simplified for performance, canvas does the heavy lifting) */}
-         {currentTheme === 'NOIR' && <div className="h-full flex items-center justify-center text-zinc-100 font-mono text-3xl font-bold tracking-tighter">CASE CLOSED</div>}
-         {currentTheme === 'NEON' && <div className="h-full flex items-center justify-center text-white font-sans text-4xl font-black italic">SESSION<br/>COMPLETE</div>}
-         {currentTheme === 'ZEN' && <div className="h-full flex items-center justify-center text-stone-800 font-serif text-4xl">Mindful<br/>Session</div>}
-         {currentTheme === 'AURA' && <div className="h-full flex items-center justify-center text-white font-sans text-4xl font-bold tracking-widest">TOP FAN</div>}
+    {/* 2. THE MAIN CARD (Updated with Real Preview) */}
+      <div className="relative w-full max-w-[360px] aspect-[9/16] rounded-3xl shadow-2xl overflow-hidden transition-all duration-500 mb-8 border-4 border-white/10 animate-in zoom-in-95 duration-500 bg-slate-900">
          
-         <div className="absolute bottom-8 left-0 right-0 text-center opacity-50 text-[10px] uppercase tracking-widest">Preview Mode</div>
+         {previewUrl ? (
+             <img 
+               src={previewUrl} 
+               alt="Session Preview" 
+               className="w-full h-full object-contain" 
+             />
+         ) : (
+             <div className="flex items-center justify-center h-full text-white/50 animate-pulse">
+               Generating Preview...
+             </div>
+         )}
+
       </div>
 
       {/* 3. THE CONTROL DOCK (Glassmorphic) */}

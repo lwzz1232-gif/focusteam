@@ -1,7 +1,7 @@
 
 export enum Screen {
-  LANDING = 'LANDING',
   SPLASH = 'SPLASH',
+  LANDING = 'LANDING',
   LOGIN = 'LOGIN',
   DASHBOARD = 'DASHBOARD',
   MATCHING = 'MATCHING',

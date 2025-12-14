@@ -6,7 +6,90 @@ import { db } from '../utils/firebaseConfig';
 import { doc, onSnapshot, collection, addDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import Globe from 'react-globe.gl';
 
-// --- UPGRADE: BRIGHTER NEON ARCS ---
+// --- WARP SPEED COMPONENT (Lightweight Canvas) ---
+const WarpSpeed = () => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let width = (canvas.width = window.innerWidth);
+    let height = (canvas.height = window.innerHeight);
+    
+    // Star properties
+    const numStars = 500; // Safe for all PCs
+    const stars: any[] = [];
+    const centerX = width / 2;
+    const centerY = height / 2;
+
+    for (let i = 0; i < numStars; i++) {
+      stars.push({
+        x: Math.random() * width - centerX,
+        y: Math.random() * height - centerY,
+        z: Math.random() * width, // depth
+        o: '0.' + Math.floor(Math.random() * 99) + 1 // opacity
+      });
+    }
+
+    let animationFrameId: number;
+    let speed = 2; // Starting speed
+
+    const move = () => {
+      // Accelerate the warp effect
+      if(speed < 50) speed += 0.5;
+
+      // Fill background (Black with slight transparency for trail effect)
+      ctx.fillStyle = "rgba(0, 0, 0, 0.4)"; 
+      ctx.fillRect(0, 0, width, height);
+
+      for (let i = 0; i < numStars; i++) {
+        const star = stars[i];
+        
+        // Move star closer
+        star.z -= speed;
+
+        // Reset star if it passes screen
+        if (star.z <= 0) {
+          star.z = width;
+          star.x = Math.random() * width - centerX;
+          star.y = Math.random() * height - centerY;
+        }
+
+        // Project 3D position to 2D
+        const x = centerX + (star.x / star.z) * width;
+        const y = centerY + (star.y / star.z) * height;
+        
+        // Calculate size based on proximity
+        const size = (1 - star.z / width) * 4;
+
+        // Draw Star/Streak
+        ctx.beginPath();
+        // Cyan and White mix for sci-fi look
+        ctx.strokeStyle = Math.random() > 0.8 ? "#22d3ee" : "#ffffff"; 
+        ctx.lineWidth = size;
+        ctx.moveTo(x, y);
+        // Create the trail (streak)
+        const prevX = centerX + (star.x / (star.z + speed * 2)) * width;
+        const prevY = centerY + (star.y / (star.z + speed * 2)) * height;
+        ctx.lineTo(prevX, prevY);
+        ctx.stroke();
+      }
+
+      animationFrameId = requestAnimationFrame(move);
+    };
+
+    move();
+
+    return () => cancelAnimationFrame(animationFrameId);
+  }, []);
+
+  return <canvas ref={canvasRef} className="absolute inset-0 z-50 pointer-events-none" />;
+};
+
+// --- GLOBE HELPERS ---
 const N_ARCS = 20;
 const genRandomArcs = () => {
   return [...Array(N_ARCS).keys()].map(() => ({
@@ -14,7 +97,6 @@ const genRandomArcs = () => {
     startLng: (Math.random() - 0.5) * 360,
     endLat: (Math.random() - 0.5) * 180,
     endLng: (Math.random() - 0.5) * 360,
-    // Brighter Colors: Cyan and Hot Pink
     color: ['#22d3ee', '#f472b6'][Math.round(Math.random())] 
   }));
 };
@@ -31,13 +113,14 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
   const [sessionIdToWatch, setSessionIdToWatch] = useState<string | null>(null);
   const [hasCalledOnMatch, setHasCalledOnMatch] = useState(false);
   const [isInLobby, setIsInLobby] = useState(false);
+  
+  // NEW STATE: Controls the Warp Animation
+  const [isWarping, setIsWarping] = useState(false);
+
   const lobbyTicketRef = useRef<string | null>(null);
   const globeEl = useRef<any>();
-
-  // GLOBE DATA
   const arcsData = useMemo(() => genRandomArcs(), []);
   
-  // FIX: Added safety check for window to prevent SSR crashes
   const [windowSize, setWindowSize] = useState({ 
     w: typeof window !== 'undefined' ? window.innerWidth : 800, 
     h: typeof window !== 'undefined' ? window.innerHeight : 600 
@@ -88,20 +171,38 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
     return () => { clearTimeout(timeoutId); isActive = false; };
   }, [status, sessionIdToWatch, user, config, isInLobby]);
 
-  // Session Listener
+  // --- MODIFIED SESSION LISTENER ---
   useEffect(() => {
     if (!sessionIdToWatch || hasCalledOnMatch) return;
     const sessionRef = doc(collection(db, 'sessions'), sessionIdToWatch);
+    
     const unsubscribe = onSnapshot(sessionRef, (snap) => {
       if (!snap.exists()) return;
       const sessionData = snap.data() as any;
+      
       const triggerMatch = () => {
         if (!hasCalledOnMatch) {
           setHasCalledOnMatch(true);
+          
           const p = sessionData.participantInfo?.find((p: any) => p.userId !== user.id);
-          if (p) onMatched({ id: p.userId, name: p.displayName || 'Partner', type: sessionData.config?.type || 'ANY' }, sessionIdToWatch);
+          
+          if (p) {
+            // 1. TRIGGER WARP EFFECT
+            setIsWarping(true);
+            setStatusText("JUMPING TO HYPERSPACE...");
+
+            // 2. WAIT 2.5 SECONDS THEN CHANGE PAGE
+            setTimeout(() => {
+                onMatched({ 
+                    id: p.userId, 
+                    name: p.displayName || 'Partner', 
+                    type: sessionData.config?.type || 'ANY' 
+                }, sessionIdToWatch);
+            }, 2500);
+          }
         }
       };
+
       if (sessionData.started === true) triggerMatch();
       if (Array.isArray(sessionData.participants) && sessionData.participants.length >= 2) triggerMatch();
     });
@@ -110,19 +211,18 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
 
   // Text Rotation
   useEffect(() => {
+    if(isWarping) return; // Don't rotate text if warping
     if (isInLobby) { setStatusText("Broadcasting to Public Lobby..."); return; }
     if (status === 'SEARCHING') {
       const msgs = [`Scanning for ${config.type}...`, "Triangulating signal...", "Handshaking with peer network..."];
       let i = 0;
       const interval = setInterval(() => { i = (i + 1) % msgs.length; setStatusText(msgs[i]); }, 3000);
       return () => clearInterval(interval);
-    } else if (status === 'MATCHED') { setStatusText("Connection Locked."); }
-  }, [status, config, isInLobby]);
+    } 
+  }, [status, config, isInLobby, isWarping]);
 
-  // --- UPGRADE: FASTER ROTATION & ZOOM ---
   useEffect(() => {
     if (globeEl.current) {
-      // Small timeout ensures the globe is fully mounted before controlling
       setTimeout(() => {
         if (!globeEl.current) return;
         globeEl.current.controls().autoRotate = true;
@@ -135,51 +235,44 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
   const indexLink = error && error.includes('https://console.firebase.google.com') ? error.match(/https:\/\/console\.firebase\.google\.com[^\s]*/)?.[0] : null;
 
   return (
-    // FIX: Changed 'h-full' to 'h-screen' to ensure the container has height
     <div className="flex-1 flex flex-col items-center justify-center bg-black relative overflow-hidden h-screen w-full">
       
-      {/* --- 3D GLOBE (UPGRADED) --- */}
-      <div className="absolute inset-0 z-0 opacity-100 transition-opacity duration-1000">
+      {/* --- SHOW WARP EFFECT IF MATCHED --- */}
+      {isWarping && <WarpSpeed />}
+
+      {/* --- 3D GLOBE --- */}
+      {/* We fade the globe out slightly when warping to emphasize the stars */}
+      <div className={`absolute inset-0 z-0 transition-opacity duration-500 ${isWarping ? 'opacity-20' : 'opacity-100'}`}>
         <Globe
           ref={globeEl}
           width={windowSize.w}
           height={windowSize.h}
-          // FIX: Added 'https:' to URLs to prevent protocol errors
           globeImageUrl="https://unpkg.com/three-globe/example/img/earth-night.jpg"
-          // Background Stars
           backgroundImageUrl="https://unpkg.com/three-globe/example/img/night-sky.png"
-          // FIX: Transparent background allows the CSS black background to work if image fails
           backgroundColor="rgba(0,0,0,0)"
-          
-          // ATMOSPHERE (The "Electric" Glow)
           showAtmosphere={true}
-          atmosphereColor="#7dd3fc" // Bright Sky Blue
-          atmosphereAltitude={0.2}  // Thicker glow
-          
-          // BEAMS (Lasers)
+          atmosphereColor="#7dd3fc"
+          atmosphereAltitude={0.2}
           arcsData={arcsData}
           arcColor="color"
           arcDashLength={0.5}
           arcDashGap={2}
           arcDashAnimateTime={1500}
-          arcStroke={0.8} // Thicker lines
+          arcStroke={0.8}
         />
-        
-        {/* Subtle vignette to blend edges */}
         <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_30%,black_100%)]"></div>
       </div>
 
       {/* --- UI --- */}
       {error ? (
         <div className="relative z-20 max-w-md w-full bg-red-950/80 border border-red-500/50 rounded-xl p-6 text-center backdrop-blur-md">
-          <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4"><AlertTriangle size={32} className="text-red-500" /></div>
-          <h3 className="text-xl font-bold text-white mb-2">Signal Lost</h3>
-          <p className="text-red-200 mb-4 text-sm font-mono">{error}</p>
-          {indexLink && <a href={indexLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold mb-4"><ExternalLink size={16} /> Fix Index</a>}
-          <button onClick={() => { cancelSearch(); onCancel(); }} className="text-slate-400 hover:text-white underline text-xs uppercase">Abort</button>
+          {/* ... Error UI ... */}
+          <div className="text-white">Error: {error}</div>
+          <button onClick={() => { cancelSearch(); onCancel(); }} className="text-slate-400 mt-4 underline">Cancel</button>
         </div>
       ) : (
-        <div className="relative z-20 flex flex-col items-center w-full max-w-xl pointer-events-none select-none mt-32">
+        // Hide UI when warping to make it cinematic
+        <div className={`relative z-20 flex flex-col items-center w-full max-w-xl pointer-events-none select-none mt-32 transition-all duration-500 ${isWarping ? 'scale-110 opacity-0' : 'opacity-100'}`}>
           
           <div className="text-center space-y-4">
              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-blue-500/30 bg-blue-500/10 backdrop-blur-md shadow-[0_0_15px_rgba(59,130,246,0.5)]">

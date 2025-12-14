@@ -57,7 +57,7 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                 setLastUserDoc(snap.docs[snap.docs.length - 1]);
                 setUsers(snap.docs.map(d => ({ ...d.data(), id: d.id })));
             }
-            else if (activeTab === 'sessions') {
+         else if (activeTab === 'sessions') {
                 const q = query(collection(db, 'sessions'), orderBy('createdAt', 'desc'), limit(20));
                 const snap = await getDocs(q);
                 setLastSessionDoc(snap.docs[snap.docs.length - 1]);
@@ -76,49 +76,50 @@ export const Admin: React.FC<AdminProps> = ({ onBack }) => {
                         u2Name = data.user2 || 'Unknown';
                     }
 
-                    // --- ZOMBIE SESSION FIX START ---
+                    // --- ROBUST DURATION & STATUS LOGIC ---
                     const startMs = data.createdAt?.toMillis() || Date.now();
+                    const configDuration = data.config?.duration || 30; // Scheduled time (e.g. 50m)
                     
-                    // 1. Get Duration (Default 30m)
-                    const configDuration = data.config?.duration || 30; 
+                    // 1. Determine if it finished successfully
+                    // It counts as done if status is 'completed' OR if the phase reached 'COMPLETED'/'DEBRIEF'
+                    const isSuccess = data.status === 'completed' || data.phase === 'COMPLETED' || data.phase === 'DEBRIEF';
                     
-                    // 2. Dynamic Buffer: If Test Mode (< 5 mins), wait only 3 mins. Otherwise wait 15 mins.
-                    const zombieBufferMins = configDuration < 5 ? 3 : 15;
-                    
-                    // 3. Calculate "Death Time"
-                    const maxReasonableTime = startMs + (configDuration * 60000) + (zombieBufferMins * 60000);
-                    
-                    // 4. Check if Zombie (Active status BUT past the reasonable time)
-                    const isZombie = data.status === 'active' && Date.now() > maxReasonableTime;
-
+                    // 2. Determine End Time
                     let endMs = data.endedAt?.toMillis();
-
-                    if (!endMs) {
-                        if (data.status === 'active' && !isZombie) {
-                            // Truly LIVE
-                            endMs = Date.now();
-                        } else {
-                            // Zombie or Aborted or Timed Out -> Stop timer at update or start
-                            endMs = data.updatedAt?.toMillis() || startMs;
-                        }
+                    
+                    // If no explicit end time, but it was a success, assume they did the full time
+                    if (!endMs && isSuccess) {
+                        endMs = startMs + (configDuration * 60000);
+                    }
+                    // If aborted/zombie, use the last update time
+                    else if (!endMs) {
+                        endMs = data.updatedAt?.toMillis() || startMs;
                     }
 
+                    // 3. Calculate Actual Duration
                     let finalDuration = 0;
                     if (endMs && startMs) {
                         finalDuration = Math.max(0, Math.floor((endMs - startMs) / 60000));
                     }
-                    
-                    // Fallback for clean completions
-                    if (finalDuration === 0 && data.status === 'completed') {
-                         finalDuration = configDuration;
+
+                    // 4. Force Duration Correction
+                    // If it was successful but math says 0m (or strangely short), force it to the scheduled time
+                    if (isSuccess && finalDuration < 5) {
+                        finalDuration = configDuration;
                     }
 
+                    // 5. Determine Label
+                    // Check Zombie status (Active but way past due time)
+                    const maxReasonableTime = startMs + (configDuration * 60000) + (15 * 60000); // Duration + 15m buffer
+                    const isZombie = data.status === 'active' && Date.now() > maxReasonableTime;
+
                     let outcomeLabel = 'ABORTED';
-                    if (data.status === 'completed') outcomeLabel = 'COMPLETED';
+                    
+                    if (isSuccess) outcomeLabel = 'COMPLETED';
                     else if (data.status === 'active' && !isZombie) outcomeLabel = 'LIVE';
-                    else if (isZombie) outcomeLabel = 'TIMED OUT'; // "Zombie" detected
+                    else if (isZombie) outcomeLabel = 'TIMED OUT'; // likely user closed tab without exiting
+                    else if (data.status === 'aborted') outcomeLabel = 'ABORTED';
                     else if (finalDuration > 0) outcomeLabel = 'PARTIAL';
-                    // --- ZOMBIE SESSION FIX END ---
 
                     return {
                         id: d.id,

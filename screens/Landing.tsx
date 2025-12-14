@@ -1,67 +1,95 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, MouseEvent } from 'react';
 import { Logo } from '../components/Logo';
-import { ArrowRight, CheckCircle2, Clock, Users, Zap, ShieldCheck, Play, ChevronDown, HelpCircle } from 'lucide-react';
+import { 
+  ArrowRight, Check, Clock, Users, Zap, Shield, Play, 
+  ChevronDown, Star, Activity, Lock, MousePointer2 
+} from 'lucide-react';
 
-// --- 1. UTILITY: FADE IN COMPONENT (Unchanged - works great) ---
-const FadeIn: React.FC<{ children: React.ReactNode; delay?: number }> = ({ children, delay = 0 }) => {
+// --- 1. CORE UTILITIES & ANIMATIONS ---
+
+// A hook to track mouse position for the "Spotlight" effect
+const useMousePosition = () => {
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+  useEffect(() => {
+    const updateMousePosition = (ev: MouseEvent | any) => {
+      setMousePosition({ x: ev.clientX, y: ev.clientY });
+    };
+    window.addEventListener('mousemove', updateMousePosition);
+    return () => window.removeEventListener('mousemove', updateMousePosition);
+  }, []);
+  return mousePosition;
+};
+
+// Smooth Reveal Component
+const Reveal: React.FC<{ children: React.ReactNode; delay?: number; width?: string }> = ({ children, delay = 0, width = "fit-content" }) => {
   const [isVisible, setIsVisible] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setIsVisible(true);
-          observer.unobserve(entry.target);
-        }
-      },
-      { threshold: 0.1 } 
-    );
-
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        setIsVisible(true);
+        observer.unobserve(entry.target);
+      }
+    }, { threshold: 0.15 });
     if (ref.current) observer.observe(ref.current);
     return () => observer.disconnect();
   }, []);
 
   return (
-    <div
-      ref={ref}
-      className={`transition-all duration-1000 ease-out transform ${
-        isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-12'
-      }`}
-      style={{ transitionDelay: `${delay}ms` }}
-    >
-      {children}
-    </div>
-  );
-};
-
-// --- 2. UTILITY: ACCORDION ITEM (For the new FAQ) ---
-const AccordionItem: React.FC<{ question: string; answer: string }> = ({ question, answer }) => {
-  const [isOpen, setIsOpen] = useState(false);
-
-  return (
-    <div className="border-b border-slate-800">
-      <button 
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full py-6 flex items-center justify-between text-left hover:bg-slate-900/30 transition-colors px-2 rounded-lg"
-      >
-        <span className="font-medium text-lg text-slate-200">{question}</span>
-        <ChevronDown 
-          className={`text-slate-500 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} 
-        />
-      </button>
-      <div 
-        className={`overflow-hidden transition-all duration-300 ease-in-out ${
-          isOpen ? 'max-h-48 opacity-100 pb-6' : 'max-h-0 opacity-0'
-        }`}
-      >
-        <p className="text-slate-400 leading-relaxed px-2 pr-8">
-          {answer}
-        </p>
+    <div ref={ref} style={{ width }} className={`relative overflow-hidden`}>
+      <div className={`transition-all duration-1000 cubic-bezier(0.17, 0.55, 0.55, 1) ${isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-12'}`} style={{ transitionDelay: `${delay}ms` }}>
+        {children}
       </div>
     </div>
   );
 };
+
+// Spotlight Card Component (Glows on hover based on cursor)
+const SpotlightCard: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className = "" }) => {
+  const divRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [opacity, setOpacity] = useState(0);
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!divRef.current) return;
+    const rect = divRef.current.getBoundingClientRect();
+    setPosition({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+  };
+
+  return (
+    <div
+      ref={divRef}
+      onMouseMove={handleMouseMove}
+      onMouseEnter={() => setOpacity(1)}
+      onMouseLeave={() => setOpacity(0)}
+      className={`relative overflow-hidden rounded-xl border border-white/10 bg-white/5 ${className}`}
+    >
+      <div
+        className="pointer-events-none absolute -inset-px opacity-0 transition duration-300"
+        style={{
+          opacity,
+          background: `radial-gradient(600px circle at ${position.x}px ${position.y}px, rgba(59, 130, 246, 0.15), transparent 40%)`,
+        }}
+      />
+      <div className="relative h-full">{children}</div>
+    </div>
+  );
+};
+
+// --- 2. SUB-COMPONENTS ---
+
+const StatBadge: React.FC<{ icon: React.ElementType; label: string; value: string }> = ({ icon: Icon, label, value }) => (
+  <div className="flex items-center gap-3 px-4 py-2 rounded-full bg-white/5 border border-white/10 backdrop-blur-md">
+    <Icon size={16} className="text-blue-400" />
+    <div className="flex flex-col leading-none">
+      <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">{label}</span>
+      <span className="text-sm font-bold text-slate-100">{value}</span>
+    </div>
+  </div>
+);
+
+// --- 3. MAIN LANDING COMPONENT ---
 
 interface LandingProps {
   onGetStarted: () => void;
@@ -69,305 +97,322 @@ interface LandingProps {
 }
 
 export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
-  
-  // Handle Smooth Scroll to "How it works"
-  const scrollToHowItWorks = () => {
-    const element = document.getElementById('how-it-works');
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth' });
-    }
+  const mouse = useMousePosition();
+
+  // CSS for background grid animation
+  const gridStyle = {
+    backgroundImage: `linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px)`,
+    backgroundSize: '40px 40px',
+    maskImage: 'radial-gradient(ellipse at center, black 40%, transparent 100%)',
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 selection:bg-blue-500/30 overflow-x-hidden font-sans">
+    <div className="min-h-screen bg-[#05050A] text-slate-200 font-sans selection:bg-blue-500/30 overflow-x-hidden">
       
-      {/* --- BACKGROUND AMBIANCE (Brightened slightly) --- */}
-      <div className="fixed inset-0 pointer-events-none">
-        {/* Top white glow - simulates ceiling light/sun */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[300px] bg-white/5 blur-[100px] rounded-full" />
+      {/* --- AMBIENT BACKGROUND --- */}
+      <div className="fixed inset-0 pointer-events-none z-0">
+        {/* Moving Grid */}
+        <div className="absolute inset-0" style={gridStyle}></div>
         
-        {/* Blue accents - brighter now (blue-600 instead of 900) */}
-        <div className="absolute top-[-10%] left-1/2 -translate-x-1/2 w-[1000px] h-[600px] bg-blue-600/10 blur-[120px] rounded-full mix-blend-screen" />
-        <div className="absolute bottom-[-10%] left-1/4 w-[800px] h-[600px] bg-indigo-600/10 blur-[120px] rounded-full mix-blend-screen" />
+        {/* Mouse Follower Glow (Subtle) */}
+        <div 
+          className="absolute w-[800px] h-[800px] bg-blue-600/10 rounded-full blur-[120px] transition-transform duration-100 ease-out -translate-x-1/2 -translate-y-1/2"
+          style={{ left: mouse.x, top: mouse.y }}
+        />
         
-        {/* Grain overlay */}
-        <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.03]"></div>
+        {/* Top Light */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-[500px] bg-gradient-to-b from-blue-900/10 via-transparent to-transparent blur-3xl" />
       </div>
 
-      {/* --- HERO SECTION --- */}
-      <section className="relative min-h-[95vh] flex flex-col items-center justify-center px-6 pt-20 pb-32">
-        
-        {/* Top Nav */}
-        <nav className="absolute top-0 w-full max-w-7xl mx-auto p-6 flex justify-between items-center z-50">
-           <div className="w-20"></div> {/* Spacer for centering */}
-           <button 
-             onClick={onSignIn}
-             className="text-sm font-medium text-slate-300 hover:text-white transition-colors bg-white/5 hover:bg-white/10 px-4 py-2 rounded-full backdrop-blur-sm border border-white/5"
-           >
-             Login
-           </button>
-        </nav>
-
-        <div className="text-center max-w-4xl mx-auto space-y-8 z-10">
-          
-          {/* Logo */}
-          <FadeIn>
-            <div className="flex justify-center mb-8">
-              <div className="p-4 rounded-3xl bg-slate-900/80 border border-slate-700/50 shadow-2xl shadow-blue-500/10 backdrop-blur-md">
-                <Logo className="w-16 h-16 md:w-20 md:h-20" />
-              </div>
-            </div>
-          </FadeIn>
-
-          <FadeIn delay={200}>
-            <h1 className="text-6xl md:text-8xl font-bold tracking-tight text-white mb-4 drop-shadow-xl">
-              FocusTwin
-            </h1>
-            <p className="text-xl md:text-2xl text-slate-300 font-light tracking-wide max-w-2xl mx-auto">
-              Don't work alone. Work together.<br/>
-              <span className="text-slate-500 text-lg">The quietest productivity community on earth.</span>
-            </p>
-          </FadeIn>
-
-          <FadeIn delay={400}>
-            <div className="flex flex-col md:flex-row items-center justify-center gap-4 mt-8">
-              <button 
-                onClick={onGetStarted}
-                className="group relative px-8 py-4 bg-white text-black font-bold rounded-full text-lg hover:bg-slate-200 transition-all flex items-center gap-2 overflow-hidden shadow-[0_0_40px_-10px_rgba(255,255,255,0.3)]"
-              >
-                <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-white/50 to-transparent -translate-x-full group-hover:animate-shimmer" />
-                <span>Start Session</span>
-                <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
-              </button>
-              
-              <button 
-                onClick={scrollToHowItWorks} 
-                className="px-8 py-4 rounded-full text-slate-300 hover:text-white hover:bg-white/5 transition-all flex items-center gap-2 font-medium border border-transparent hover:border-slate-700"
-              >
-                <Play size={18} /> How it works
-              </button>
-            </div>
-          </FadeIn>
-          
-        </div>
-
-        {/* Scroll indicator */}
-        <div className="absolute bottom-10 animate-bounce text-slate-500">
-           <div className="w-px h-12 bg-gradient-to-b from-slate-500 to-transparent mx-auto"></div>
-        </div>
-      </section>
-
-
-      {/* --- THE PROBLEM & SOLUTION (Images Added) --- */}
-      <section className="relative z-10 py-32 px-6 border-t border-slate-800/50 bg-slate-950/50 backdrop-blur-sm">
-        <div className="max-w-6xl mx-auto">
-          <FadeIn>
-            <div className="grid md:grid-cols-2 gap-20 items-center">
-              
-              {/* Text Side */}
-              <div className="order-2 md:order-1">
-                <h2 className="text-4xl md:text-5xl font-bold leading-tight mb-6 text-white">
-                  The silence of <br/>
-                  <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400">
-                    shared accountability.
-                  </span>
-                </h2>
-                <p className="text-lg text-slate-300 leading-relaxed mb-8">
-                  Procrastination feeds on isolation. When you're alone, it's easy to pick up your phone. 
-                  But when someone is on the other side of the screen working with you, the dynamic changes.
-                </p>
-                
-                <div className="space-y-4">
-                  {[
-                    "No small talk. Just deep work.",
-                    "50-minute matched sessions.",
-                    "Strict community guidelines."
-                  ].map((item, i) => (
-                    <div key={i} className="flex items-center gap-3 text-slate-300">
-                      <div className="p-1 rounded-full bg-blue-500/20 text-blue-400">
-                        <CheckCircle2 size={16} />
-                      </div>
-                      {item}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Visual Side - THE NEW IMAGES */}
-              <div className="order-1 md:order-2 relative">
-                  {/* Glow effect behind images */}
-                  <div className="absolute inset-0 bg-blue-500/20 blur-[60px] rounded-full opacity-50"></div>
-                  
-                  {/* The "Interface" Container */}
-                  <div className="relative z-10 bg-slate-900 border border-slate-700 rounded-2xl p-2 shadow-2xl rotate-3 hover:rotate-0 transition-transform duration-500">
-                    
-                    {/* Fake Window Header */}
-                    <div className="flex items-center gap-2 mb-2 px-2">
-                       <div className="w-3 h-3 rounded-full bg-red-500/50"></div>
-                       <div className="w-3 h-3 rounded-full bg-yellow-500/50"></div>
-                       <div className="w-3 h-3 rounded-full bg-green-500/50"></div>
-                       <div className="ml-auto flex items-center gap-1 bg-slate-800 px-2 py-0.5 rounded text-[10px] text-red-400 font-bold animate-pulse">
-                          <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div> LIVE
-                       </div>
-                    </div>
-
-                    {/* The Grid of 2 Users */}
-                    <div className="grid grid-cols-2 gap-2">
-                        {/* User 1 */}
-                        <div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-slate-800 group">
-                           <img 
-                             src="https://images.unsplash.com/photo-1664575602276-acd073f104c1?q=80&w=600&auto=format&fit=crop" 
-                             alt="Person focusing"
-                             className="object-cover w-full h-full opacity-80 group-hover:opacity-100 transition-opacity"
-                           />
-                           <div className="absolute bottom-2 left-2 bg-black/50 backdrop-blur px-2 py-1 rounded text-[10px] text-white">You</div>
-                        </div>
-
-                        {/* User 2 */}
-                        <div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-slate-800 group">
-                           <img 
-                             src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?q=80&w=600&auto=format&fit=crop" 
-                             alt="Partner focusing"
-                             className="object-cover w-full h-full opacity-80 group-hover:opacity-100 transition-opacity"
-                           />
-                           <div className="absolute bottom-2 left-2 bg-black/50 backdrop-blur px-2 py-1 rounded text-[10px] text-white">Sarah (Partner)</div>
-                        </div>
-                    </div>
-
-                    {/* Fake Controls */}
-                    <div className="mt-2 flex justify-center gap-4 py-1">
-                        <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-500"><Zap size={14}/></div>
-                        <div className="w-8 h-8 rounded-full bg-red-500/20 border border-red-500/50 flex items-center justify-center text-red-400"><Play size={14} fill="currentColor"/></div>
-                    </div>
-
-                  </div>
-              </div>
-
-            </div>
-          </FadeIn>
-        </div>
-      </section>
-
-
-      {/* --- HOW IT WORKS (Glass Cards + ID for scroll) --- */}
-      <section id="how-it-works" className="relative z-10 py-32 px-6 bg-gradient-to-b from-transparent to-slate-900/50">
-        <div className="max-w-6xl mx-auto">
-          <FadeIn>
-            <h2 className="text-sm font-bold tracking-widest text-blue-400 uppercase mb-12 text-center">
-              The Workflow
-            </h2>
-          </FadeIn>
-          
-          <div className="grid md:grid-cols-3 gap-8">
-            {[
-              { 
-                icon: Clock, 
-                title: "Set Intentions", 
-                desc: "Choose a time. Define your task. Commit to showing up." 
-              },
-              { 
-                icon: Users, 
-                title: "Pair Up", 
-                desc: "Our algorithm matches you with a partner globally." 
-              },
-              { 
-                icon: ShieldCheck, 
-                title: "Deep Work", 
-                desc: "Cameras on. Microphones off. 50 minutes of pure focus." 
-              }
-            ].map((step, idx) => (
-              <FadeIn key={idx} delay={idx * 150}>
-                <div className="group h-full p-8 rounded-2xl bg-slate-900/40 border border-slate-700/50 hover:bg-slate-800/60 hover:border-blue-500/30 transition-all duration-300">
-                  <div className="w-12 h-12 rounded-lg bg-slate-800 flex items-center justify-center text-white mb-6 group-hover:scale-110 transition-transform duration-300 shadow-lg shadow-black/20 ring-1 ring-white/5">
-                    <step.icon size={24} />
-                  </div>
-                  <h3 className="text-xl font-bold text-white mb-3">{step.title}</h3>
-                  <p className="text-slate-400 leading-relaxed group-hover:text-slate-300 transition-colors">{step.desc}</p>
-                </div>
-              </FadeIn>
-            ))}
+      {/* --- NAVBAR --- */}
+      <nav className="fixed top-0 left-0 right-0 z-50 px-6 py-6 transition-all duration-300">
+        <div className="max-w-7xl mx-auto flex justify-between items-center bg-white/5 backdrop-blur-xl border border-white/5 rounded-full px-6 py-3 shadow-2xl shadow-black/50">
+          <div className="flex items-center gap-2">
+            <Logo className="w-8 h-8 text-white" />
+            <span className="font-bold text-white tracking-tight hidden sm:block">FocusTwin</span>
           </div>
-        </div>
-      </section>
-
-
-      {/* --- QUESTIONS (New Section) --- */}
-      <section className="relative z-10 py-24 px-6 border-t border-slate-800/50">
-        <div className="max-w-3xl mx-auto">
-          <FadeIn>
-            <div className="text-center mb-16">
-              <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">Common Questions</h2>
-              <p className="text-slate-400">Everything you need to know before your first session.</p>
-            </div>
-            
-            <div className="space-y-2">
-              <AccordionItem 
-                question="Do I have to talk to my partner?" 
-                answer="No. You greet each other briefly at the start ('Hi, I'm working on coding today'), then you mute your microphone. The goal is silence." 
-              />
-              <AccordionItem 
-                question="Is this free?" 
-                answer="Yes. FocusTwin is currently completely free to use. In the future, we may introduce premium features, but the core matching will remain accessible." 
-              />
-              <AccordionItem 
-                question="Do I need a webcam?" 
-                answer="Yes. The psychology of the platform relies on 'body doubling'—being seen working helps you work. However, we do not record or store any video." 
-              />
-              <AccordionItem 
-                question="What if my partner is inappropriate?" 
-                answer="We have a zero-tolerance policy. You can end the session instantly and report the user. They will be banned from the platform." 
-              />
-            </div>
-          </FadeIn>
-        </div>
-      </section>
-
-
-      {/* --- FINAL CTA --- */}
-      <section className="relative py-32 flex items-center justify-center overflow-hidden">
-        {/* Glow behind */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-blue-600/10 blur-[100px] rounded-full" />
-        
-        <div className="relative z-10 text-center px-6">
-          <FadeIn>
-            <h2 className="text-5xl md:text-7xl font-bold text-white tracking-tight mb-8">
-              Ready to <span className="italic font-serif text-blue-400">focus?</span>
-            </h2>
+          
+          <div className="flex items-center gap-6">
+            <button onClick={onSignIn} className="text-sm font-medium text-slate-400 hover:text-white transition-colors">
+              Log in
+            </button>
             <button 
               onClick={onGetStarted}
-              className="px-10 py-5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-full text-xl shadow-lg shadow-blue-900/40 hover:shadow-blue-900/60 hover:-translate-y-1 transition-all duration-300"
+              className="px-5 py-2 rounded-full bg-white text-black text-sm font-bold hover:bg-blue-50 transition-colors shadow-[0_0_20px_-5px_rgba(255,255,255,0.4)]"
             >
-              Get Matched Now
+              Start Session
             </button>
-            <p className="mt-6 text-sm text-slate-500">
-              Join 1,000+ others working quietly right now.
+          </div>
+        </div>
+      </nav>
+
+      {/* --- HERO SECTION --- */}
+      <section className="relative z-10 pt-40 pb-20 px-6 min-h-screen flex flex-col items-center justify-center">
+        
+        {/* Status Badge */}
+        <Reveal>
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-medium mb-8 animate-pulse">
+            <span className="w-2 h-2 rounded-full bg-blue-400 shadow-[0_0_10px_currentColor]"></span>
+            142 people focusing right now
+          </div>
+        </Reveal>
+
+        {/* Main Title */}
+        <div className="text-center max-w-5xl mx-auto space-y-6">
+          <Reveal delay={100}>
+            <h1 className="text-5xl md:text-8xl font-bold tracking-tight text-white leading-[1.1]">
+              Don't work alone. <br />
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-400">
+                Work Together.
+              </span>
+            </h1>
+          </Reveal>
+
+          <Reveal delay={200}>
+            <p className="text-lg md:text-xl text-slate-400 max-w-2xl mx-auto leading-relaxed">
+              Experience the quietest productivity community on earth. 
+              We match you with a partner for 50 minutes of deep work. 
+              <span className="text-slate-200"> Cameras on. Mics off. Zero distractions.</span>
             </p>
-          </FadeIn>
+          </Reveal>
+
+          <Reveal delay={300}>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mt-10">
+              <button 
+                onClick={onGetStarted}
+                className="group relative h-14 px-8 rounded-full bg-blue-600 text-white font-bold text-lg overflow-hidden transition-all hover:scale-105 hover:shadow-[0_0_40px_-10px_rgba(37,99,235,0.5)]"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-100%] group-hover:animate-[shimmer_1.5s_infinite]"></div>
+                <div className="flex items-center gap-2">
+                  <span>Find a Partner</span>
+                  <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform"/>
+                </div>
+              </button>
+              
+              <button 
+                onClick={() => document.getElementById('how-it-works')?.scrollIntoView({behavior: 'smooth'})}
+                className="h-14 px-8 rounded-full border border-slate-700 hover:bg-slate-800 text-slate-300 font-medium transition-all flex items-center gap-2"
+              >
+                <Play size={16} fill="currentColor" /> See how it works
+              </button>
+            </div>
+          </Reveal>
+        </div>
+
+        {/* Hero Visual Mockup */}
+        <Reveal delay={500} width="100%">
+          <div className="mt-20 relative max-w-4xl mx-auto">
+             {/* Glow behind mockups */}
+             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[120%] h-[120%] bg-blue-500/20 blur-[100px] rounded-full opacity-50"></div>
+             
+             {/* The Interface */}
+             <div className="relative bg-slate-900 border border-slate-700/50 rounded-2xl p-2 shadow-2xl backdrop-blur-sm">
+                <div className="flex items-center justify-between px-4 py-3 bg-slate-950/50 rounded-t-xl border-b border-slate-800">
+                   <div className="flex gap-2">
+                      <div className="w-3 h-3 rounded-full bg-slate-700"></div>
+                      <div className="w-3 h-3 rounded-full bg-slate-700"></div>
+                   </div>
+                   <div className="text-xs font-mono text-slate-500 flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div> LIVE SESSION
+                   </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2 p-2">
+                   {/* User Video */}
+                   <div className="aspect-video bg-slate-800 rounded-lg relative overflow-hidden group">
+                      <img src="https://images.unsplash.com/photo-1598550874175-4d7112ee661c?q=80&w=800&auto=format&fit=crop" className="w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity" alt="You" />
+                      <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur px-2 py-1 rounded text-[10px] font-mono text-white">YOU</div>
+                   </div>
+                   {/* Partner Video */}
+                   <div className="aspect-video bg-slate-800 rounded-lg relative overflow-hidden group border border-blue-500/30">
+                      <img src="https://images.unsplash.com/photo-1531538606174-0f90ff5dce83?q=80&w=800&auto=format&fit=crop" className="w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity" alt="Partner" />
+                      <div className="absolute inset-0 flex items-center justify-center">
+                         <div className="w-12 h-12 rounded-full bg-blue-600/20 flex items-center justify-center backdrop-blur-sm border border-blue-500/50">
+                           <Activity size={20} className="text-blue-400" />
+                         </div>
+                      </div>
+                      <div className="absolute bottom-3 left-3 bg-blue-600/80 backdrop-blur px-2 py-1 rounded text-[10px] font-mono text-white flex items-center gap-1">
+                         <span className="w-1.5 h-1.5 bg-white rounded-full animate-bounce"></span> SARAH IS TYPING...
+                      </div>
+                   </div>
+                </div>
+                {/* Control Bar */}
+                <div className="h-12 mt-2 bg-slate-950/50 rounded-lg flex items-center justify-center gap-6 border border-slate-800/50">
+                   <div className="p-2 rounded-full bg-slate-800/50 text-slate-500"><MousePointer2 size={16}/></div>
+                   <div className="p-2 rounded-full bg-red-500/20 text-red-400 border border-red-500/20"><Play size={16} fill="currentColor"/></div>
+                   <div className="p-2 rounded-full bg-slate-800/50 text-slate-500"><Lock size={16}/></div>
+                </div>
+             </div>
+          </div>
+        </Reveal>
+      </section>
+
+      {/* --- STATS BAR --- */}
+      <div className="border-y border-white/5 bg-white/[0.02] backdrop-blur-sm">
+        <div className="max-w-6xl mx-auto py-8 grid grid-cols-2 md:grid-cols-4 gap-8 px-6">
+           <StatBadge icon={Users} label="Community" value="25k+ Members" />
+           <StatBadge icon={Clock} label="Focus Time" value="1.2M Hours" />
+           <StatBadge icon={Zap} label="Average Session" value="50 Minutes" />
+           <StatBadge icon={Star} label="Rating" value="4.9/5.0" />
+        </div>
+      </div>
+
+      {/* --- THE RITUAL (HOW IT WORKS) --- */}
+      <section id="how-it-works" className="py-32 px-6 relative overflow-hidden">
+        <div className="max-w-6xl mx-auto relative z-10">
+          <Reveal>
+            <div className="mb-20">
+              <h2 className="text-4xl md:text-6xl font-bold text-white mb-6">The Ritual.</h2>
+              <p className="text-xl text-slate-400 max-w-xl">
+                We've stripped away the noise. No scheduling, no calendars, no small talk. 
+                Just pure flow state on demand.
+              </p>
+            </div>
+          </Reveal>
+
+          <div className="grid md:grid-cols-3 gap-8 relative">
+             {/* Connecting Line (Desktop) */}
+             <div className="hidden md:block absolute top-12 left-0 w-full h-px bg-gradient-to-r from-transparent via-blue-500/50 to-transparent z-0"></div>
+
+             {[
+               {
+                 step: "01",
+                 title: "Set Your Intent",
+                 desc: "Log in and define what you need to accomplish in the next 50 minutes. Writing it down makes it real.",
+                 icon: MousePointer2
+               },
+               {
+                 step: "02",
+                 title: "Instant Match",
+                 desc: "Our algorithm finds a partner anywhere in the world who is ready to start right now. No waiting.",
+                 icon: Users
+               },
+               {
+                 step: "03",
+                 title: "Deep Work",
+                 desc: "Greet your partner, mute your mic, and work. The presence of another human keeps you honest.",
+                 icon: Lock
+               }
+             ].map((item, idx) => (
+               <Reveal key={idx} delay={idx * 200}>
+                 <SpotlightCard className="h-full p-8 bg-black/40 backdrop-blur-sm relative z-10 group">
+                    <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center mb-6 shadow-lg group-hover:scale-110 group-hover:border-blue-500/50 transition-all duration-300">
+                      <item.icon className="text-slate-200 group-hover:text-blue-400 transition-colors" size={24} />
+                    </div>
+                    <div className="text-xs font-mono text-blue-500 mb-2">STEP {item.step}</div>
+                    <h3 className="text-2xl font-bold text-white mb-3">{item.title}</h3>
+                    <p className="text-slate-400 leading-relaxed">
+                      {item.desc}
+                    </p>
+                 </SpotlightCard>
+               </Reveal>
+             ))}
+          </div>
         </div>
       </section>
 
-      {/* --- FOOTER (Polished) --- */}
-      <footer className="border-t border-slate-900 py-12 px-6 bg-slate-950">
+      {/* --- PROBLEM/SOLUTION (Comparison) --- */}
+      <section className="py-32 bg-slate-900/20 px-6 border-y border-white/5">
+         <div className="max-w-5xl mx-auto">
+            <Reveal>
+              <div className="text-center mb-16">
+                 <h2 className="text-3xl md:text-5xl font-bold text-white mb-4">Why Body Doubling Works</h2>
+                 <p className="text-slate-400">It's not magic. It's psychology.</p>
+              </div>
+            </Reveal>
+
+            <div className="grid md:grid-cols-2 gap-12">
+               {/* The "Alone" State */}
+               <Reveal delay={100}>
+                 <div className="p-8 rounded-2xl bg-red-950/10 border border-red-900/20 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-4 opacity-10"><img src="https://cdn-icons-png.flaticon.com/512/564/564619.png" className="w-32 h-32 invert" alt="" /></div>
+                    <h3 className="text-xl font-bold text-red-200 mb-4">Working Alone</h3>
+                    <ul className="space-y-4 text-red-200/60">
+                       <li className="flex gap-3"><span className="text-red-500">✕</span> Prone to phone distractions</li>
+                       <li className="flex gap-3"><span className="text-red-500">✕</span> "I'll do it in 5 minutes" mentality</li>
+                       <li className="flex gap-3"><span className="text-red-500">✕</span> Easy to quit when it gets hard</li>
+                       <li className="flex gap-3"><span className="text-red-500">✕</span> Isolated and unmotivated</li>
+                    </ul>
+                 </div>
+               </Reveal>
+
+               {/* The "Together" State */}
+               <Reveal delay={300}>
+                 <div className="p-8 rounded-2xl bg-blue-950/20 border border-blue-500/30 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-4 opacity-10"><Users size={120} className="text-blue-400" /></div>
+                    <h3 className="text-xl font-bold text-blue-200 mb-4 flex items-center gap-2">
+                       With FocusTwin <Check size={18} className="text-blue-400" />
+                    </h3>
+                    <ul className="space-y-4 text-blue-100/80">
+                       <li className="flex gap-3"><span className="text-blue-400">✓</span> Social pressure keeps you seated</li>
+                       <li className="flex gap-3"><span className="text-blue-400">✓</span> Scheduled starts kill procrastination</li>
+                       <li className="flex gap-3"><span className="text-blue-400">✓</span> Seeing others focus inspires you</li>
+                       <li className="flex gap-3"><span className="text-blue-400">✓</span> 50-minute blocks maximize flow</li>
+                    </ul>
+                 </div>
+               </Reveal>
+            </div>
+         </div>
+      </section>
+
+      {/* --- FAQ SECTION --- */}
+      <section className="py-24 px-6 max-w-3xl mx-auto">
+        <Reveal>
+          <h2 className="text-3xl font-bold text-white mb-10 text-center">Frequently Asked Questions</h2>
+          <div className="space-y-4">
+             {[
+               { q: "Do I have to talk to my partner?", a: "Barely. You say hello, state your goal, and mute. The goal is silence." },
+               { q: "Is video mandatory?", a: "Yes. Being seen is what creates the accountability. We do not record anything." },
+               { q: "Is it free?", a: "Yes, FocusTwin is currently 100% free for our beta community." },
+               { q: "What happens if my partner leaves?", a: "We'll notify you instantly and give you the option to re-match." }
+             ].map((faq, i) => (
+               <div key={i} className="group border border-white/5 rounded-lg bg-white/[0.02] hover:bg-white/[0.05] transition-colors">
+                 <details className="p-6 cursor-pointer">
+                   <summary className="font-medium text-slate-200 flex justify-between items-center list-none">
+                     {faq.q}
+                     <ChevronDown className="group-open:rotate-180 transition-transform text-slate-500" />
+                   </summary>
+                   <p className="mt-4 text-slate-400 leading-relaxed text-sm">{faq.a}</p>
+                 </details>
+               </div>
+             ))}
+          </div>
+        </Reveal>
+      </section>
+
+      {/* --- FINAL CTA --- */}
+      <section className="py-32 relative text-center px-6 overflow-hidden">
+         {/* Background Aurora */}
+         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[500px] bg-gradient-to-r from-blue-600/20 to-purple-600/20 blur-[120px] rounded-full pointer-events-none"></div>
+
+         <Reveal>
+            <div className="relative z-10">
+               <h2 className="text-5xl md:text-7xl font-bold text-white mb-8 tracking-tight">
+                 Your best work is <br/> 
+                 <span className="italic font-serif text-blue-400">waiting for you.</span>
+               </h2>
+               <p className="text-slate-400 mb-10 text-lg">Join thousands of others who have reclaimed their attention.</p>
+               <button 
+                  onClick={onGetStarted}
+                  className="px-12 py-5 bg-white text-black font-bold rounded-full text-xl hover:scale-105 transition-transform shadow-[0_0_50px_-10px_rgba(255,255,255,0.3)]"
+               >
+                 Start a Session Now
+               </button>
+            </div>
+         </Reveal>
+      </section>
+
+      {/* --- FOOTER --- */}
+      <footer className="py-12 px-6 border-t border-white/5 bg-black text-center md:text-left">
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
-          
-          <div className="flex items-center gap-2">
-            <Logo className="w-6 h-6 grayscale opacity-50 hover:opacity-100 transition-opacity" />
-            <span className="font-bold text-slate-500 hover:text-slate-300 transition-colors cursor-default">FocusTwin</span>
-          </div>
-
-          <div className="flex gap-8 text-sm">
-             {/* Note: In a real app, these would be <Link to="/privacy"> or trigger a modal */}
-            <button className="text-slate-500 hover:text-white transition-colors" onClick={() => alert("Privacy Policy would open here.")}>Privacy</button>
-            <button className="text-slate-500 hover:text-white transition-colors" onClick={() => alert("Terms of Service would open here.")}>Terms</button>
-            <button className="text-slate-500 hover:text-white transition-colors" onClick={() => window.location.href = "mailto:support@focustwin.com"}>Contact</button>
-          </div>
-
-          <div className="text-xs text-slate-600">
-            © 2025 FocusTwin Inc.
-          </div>
+           <div className="flex items-center gap-2 opacity-50 hover:opacity-100 transition-opacity">
+              <Logo className="w-6 h-6" />
+              <span className="font-bold text-slate-300">FocusTwin</span>
+           </div>
+           <div className="text-sm text-slate-600">
+              © 2025 FocusTwin. Built for deep work.
+           </div>
         </div>
       </footer>
-
     </div>
   );
 };

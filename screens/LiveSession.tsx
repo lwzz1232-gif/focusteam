@@ -11,78 +11,84 @@ import { useChat } from '../hooks/useChat';
 import { useWebRTC } from '../hooks/useWebRTC'; 
 import { db } from '../utils/firebaseConfig';
 import { collection, query, where, updateDoc, doc, addDoc, onSnapshot, deleteDoc, serverTimestamp, increment } from 'firebase/firestore';
-// --- NEW: REALISTIC FIRE ENGINE ---
-const FireCanvas = ({ active }: { active: boolean }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+import * as THREE from 'three'; // Make sure this is imported
+
+// --- ULTRA-REALISTIC THREE.JS FIRE ---
+const RealisticFire = ({ active }: { active: boolean }) => {
+  const mountRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!active || !canvasRef.current) return;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (!active || !mountRef.current) return;
+    
+    // 1. Setup Scene
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
+    camera.position.z = 20;
 
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    renderer.setSize(width, height);
+    // Additive blending needs this to look "hot"
+    renderer.setClearColor(0x000000, 0); 
+    mountRef.current.appendChild(renderer.domElement);
 
-    const particles: any[] = [];
-    const particleCount = 100; // Adjust for density
+    // 2. Generate "Glow" Texture Programmatically (No assets needed)
+    const getFireTexture = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 32; canvas.height = 32;
+        const ctx = canvas.getContext('2d');
+        if(!ctx) return null;
+        const grad = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+        grad.addColorStop(0, 'rgba(255, 255, 255, 1)'); // White hot center
+        grad.addColorStop(0.4, 'rgba(255, 200, 0, 1)'); // Yellow mid
+        grad.addColorStop(1, 'rgba(255, 0, 0, 0)');     // Red/Transparent edge
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 32, 32);
+        const texture = new THREE.CanvasTexture(canvas);
+        return texture;
+    };
+
+    // 3. Create Particle System
+    const particleCount = 2000;
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    const velocities = new Float32Array(particleCount * 3);
+    const life = new Float32Array(particleCount); // 0 to 1
 
     for (let i = 0; i < particleCount; i++) {
-      particles.push({
-        x: Math.random() * canvas.width,
-        y: canvas.height + Math.random() * 100,
-        vx: (Math.random() - 0.5) * 3,
-        vy: Math.random() * -8 - 3, // Upward speed
-        life: Math.random() * 100,
-        size: Math.random() * 15 + 5,
-        color: `hsl(${Math.random() * 40 + 10}, 100%, 50%)`
-      });
+        // Start at bottom center
+        positions[i * 3] = (Math.random() - 0.5) * 5; // X spread
+        positions[i * 3 + 1] = -15;                   // Y (Bottom)
+        positions[i * 3 + 2] = (Math.random() - 0.5) * 5; // Z depth
+
+        // Upward Physics
+        velocities[i * 3] = (Math.random() - 0.5) * 0.1; // X drift
+        velocities[i * 3 + 1] = Math.random() * 0.3 + 0.1; // Y speed (fast)
+        velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.1; // Z drift
+        
+        life[i] = Math.random(); // Random start life
     }
 
-    let animationId: number;
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    
+    const material = new THREE.PointsMaterial({
+        color: 0xffaa00,
+        size: 0.8,
+        map: getFireTexture() || undefined,
+        transparent: true,
+        opacity: 0.8,
+        blending: THREE.AdditiveBlending, // Key for "Fire" look
+        depthWrite: false
+    });
 
-    const animate = () => {
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.1)'; // Trail effect
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      ctx.globalCompositeOperation = 'lighter'; // Glowing blending
+    const particles = new THREE.Points(geometry, material);
+    scene.add(particles);
 
-      for (let i = 0; i < particles.length; i++) {
-        const p = particles[i];
-        p.x += p.vx;
-        p.y += p.vy;
-        p.life -= 1.5;
-        p.size *= 0.96;
+    // 4. Animation Loop
+    let reqId: number;
+    const animate = () =
 
-        if (p.life <= 0) {
-            // Respawn
-            p.x = Math.random() * canvas.width;
-            p.y = canvas.height + 50;
-            p.life = 100;
-            p.size = Math.random() * 15 + 5;
-            p.vy = Math.random() * -8 - 3;
-        }
-
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        // Dynamic Gradient: Yellow center, Red edges
-        const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size);
-        gradient.addColorStop(0, `hsla(50, 100%, 80%, ${p.life/100})`);
-        gradient.addColorStop(1, `hsla(10, 100%, 50%, 0)`);
-        ctx.fillStyle = gradient;
-        ctx.fill();
-      }
-      animationId = requestAnimationFrame(animate);
-    };
-    animate();
-
-    return () => cancelAnimationFrame(animationId);
-  }, [active]);
-
-  if (!active) return null;
-  return <canvas ref={canvasRef} className="absolute inset-0 z-50 pointer-events-none fade-in duration-300" />;
-};
 interface LiveSessionProps {
   user: User;
   partner: Partner;
@@ -405,15 +411,17 @@ else if (data.phase === SessionPhase.FOCUS) totalDurationForPhase = isTest ? 30 
       }).catch(console.error);
   };
 
-  const triggerAura = (emoji: string) => {
-      // NEW LOGIC: Check for Fire
+const triggerAura = (emoji: string) => {
+      // FIRE LOGIC
       if (emoji === '🔥') {
           setIsFireActive(true);
+          // Reset timer if clicked again
           if (fireTimeoutRef.current) clearTimeout(fireTimeoutRef.current);
-          fireTimeoutRef.current = setTimeout(() => setIsFireActive(false), 3500); // Burns for 3.5 seconds
-      }
-
-      // Existing logic for other emojis
+          // Show fire for 4 seconds
+          fireTimeoutRef.current = setTimeout(() => setIsFireActive(false), 4000);
+      } 
+      
+      // ... Keep your existing logic for other emojis (wave, power, etc) ...
       let type: 'fire' | 'power' | 'wave' = 'wave';
       if (emoji === '🔥') type = 'fire';
       if (emoji === '💯') type = 'power';
@@ -587,7 +595,7 @@ else if (data.phase === SessionPhase.FOCUS) totalDurationForPhase = isTest ? 30 
 
   return (
     <div className="absolute inset-0 bg-black overflow-hidden select-none font-sans">
-      <FireCanvas active={isFireActive} />
+      <RealisticFire active={isFireActive} />
       <style>{`
         @keyframes ripple-effect {
           0% { transform: scale(0); opacity: 0.8; }

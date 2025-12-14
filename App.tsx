@@ -43,7 +43,6 @@ export const App: React.FC = () => {
 
   const { user, loading } = authHook;
   const [currentScreen, setCurrentScreen] = useState<Screen>(Screen.SPLASH);
-  
   const [sessionConfig, setSessionConfig] = useState<SessionConfig>({
     type: SessionType.STUDY,
     duration: SessionDuration.MIN_30,
@@ -109,9 +108,9 @@ export const App: React.FC = () => {
   }, [user, loading]);
 
   const handleSplashComplete = () => {
-    if (user) setCurrentScreen(Screen.DASHBOARD);
-    else setCurrentScreen(Screen.LOGIN);
-  };
+  if (user) setCurrentScreen(Screen.DASHBOARD);
+  else setCurrentScreen(Screen.LANDING); // Changed from LOGIN
+};
 
   // --- UPDATED: Async to handle Test Session Creation ---
   const handleStartMatch = async (config: SessionConfig) => {
@@ -192,7 +191,10 @@ export const App: React.FC = () => {
       onAdminClick={() => setCurrentScreen(Screen.ADMIN)}
     >
       {currentScreen === Screen.SPLASH && <Splash onComplete={handleSplashComplete} />}
-      
+
+      {currentScreen === Screen.LANDING && (
+  <Landing onGetStarted={() => setCurrentScreen(Screen.LOGIN)} />
+)}
       {currentScreen === Screen.LOGIN && <Login onLogin={() => {}} />}
 
       {currentScreen === Screen.DASHBOARD && user && (

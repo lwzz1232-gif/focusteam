@@ -86,7 +86,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   // ---------------------------------------------------------------------------
   
   // 1. Calculate total expected focus duration to determine cycles
-  const calculatedFocusDuration = isTest ? 30 : (config.duration - config.preTalkMinutes - config.postTalkMinutes) * 60;
+  // FIX: Don't subtract talk time. config.duration IS the focus time.
+const calculatedFocusDuration = isTest ? 30 : config.duration * 60;
    const modeStr = String(config.mode).toUpperCase();
   // 2. Check if mode is Pomodoro (handling potentially untyped config from props)
   const isPomodoroMode = (config as any).mode === 'POMODORO' || (config as any).mode === 1;
@@ -222,7 +223,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             
             let totalDurationForPhase = 0;
             if (data.phase === SessionPhase.ICEBREAKER) totalDurationForPhase = isTest ? 30 : config.preTalkMinutes * 60;
-            else if (data.phase === SessionPhase.FOCUS) totalDurationForPhase = isTest ? 30 : (config.duration - config.preTalkMinutes - config.postTalkMinutes) * 60;
+            // FIX: Use full duration for focus
+else if (data.phase === SessionPhase.FOCUS) totalDurationForPhase = isTest ? 30 : config.duration * 60;
             else if (data.phase === SessionPhase.DEBRIEF) totalDurationForPhase = isTest ? 30 : config.postTalkMinutes * 60;
             
             const exactTimeLeft = Math.max(0, totalDurationForPhase - elapsedSeconds);
@@ -613,12 +615,15 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
         {/* TOP BAR: TIMER & PHASE */}
         <div className="absolute top-4 md:top-6 left-0 right-0 flex justify-center pointer-events-none px-14 md:px-0">
             <div className={`backdrop-blur-xl border rounded-full px-5 py-2 flex items-center gap-3 shadow-2xl transition-all duration-700 ${phase === SessionPhase.FOCUS ? 'bg-black/80 border-red-500/20 text-red-50' : 'bg-slate-900/80 border-slate-700'}`}>
-                <span className={`text-[10px] font-bold uppercase tracking-widest ${
+<span className={`text-[10px] font-bold uppercase tracking-widest ${
                     phase === SessionPhase.FOCUS 
                         ? (isPomodoroBreak ? 'text-emerald-400' : 'text-red-400') 
                         : 'text-slate-400'
                 }`}>
-                    {phaseLabel}
+                    {/* FIX: Check phase explicitly before showing label */}
+                    {phase === SessionPhase.ICEBREAKER ? 'ICEBREAKER' :
+                     phase === SessionPhase.DEBRIEF ? 'DEBRIEF' :
+                     phaseLabel}
                 </span>
                 <div className="w-px h-3 bg-white/10"></div>
                 <span className="font-mono text-lg font-variant-numeric tabular-nums text-white">

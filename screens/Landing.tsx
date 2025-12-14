@@ -226,12 +226,12 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
                 <div className="grid grid-cols-2 gap-2 p-2">
                    {/* User Video */}
                    <div className="aspect-video bg-slate-800 rounded-lg relative overflow-hidden group">
-                      <img src="https://www.pexels.com/photo/photo-of-woman-taking-notes-4458554/" className="w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity" alt="You" />
+                      <img src="https://i.imgur.com/eCB4IBN.jpeg" className="w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity" alt="You" />
                       <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur px-2 py-1 rounded text-[10px] font-mono text-white">YOU</div>
                    </div>
                    {/* Partner Video */}
                    <div className="aspect-video bg-slate-800 rounded-lg relative overflow-hidden group border border-blue-500/30">
-                      <img src="https://www.pexels.com/photo/man-wearing-black-crew-neck-t-shirt-using-black-headphones-reading-book-while-sitting-3466163/" className="w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity" alt="Partner" />
+                      <img src="https://i.imgur.com/S8VT76V.jpeg" className="w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity" alt="Partner" />
                       <div className="absolute inset-0 flex items-center justify-center">
                          <div className="w-12 h-12 rounded-full bg-blue-600/20 flex items-center justify-center backdrop-blur-sm border border-blue-500/50">
                            <Activity size={20} className="text-blue-400" />

@@ -37,7 +37,7 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
     return () => clearTimeout(timer);
   }, [currentTheme, neonVariant, user, partner, duration, completedCount]);
 
-  // --- CANVAS GENERATOR ---
+ // --- CANVAS GENERATOR ---
   const generateCanvas = async (): Promise<HTMLCanvasElement | null> => {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
@@ -50,14 +50,14 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
 
     ctx.clearRect(0, 0, 1080, 1920);
     
+    // FIX: Correct If/Else Chain
     if (currentTheme === 'NOIR') drawNoirTheme(ctx);
     else if (currentTheme === 'ZEN') drawZenTheme(ctx);
     else if (currentTheme === 'AURA') drawAuraTheme(ctx);
-    else drawNeonTheme(ctx); // Calls the router
-     else if (currentTheme === 'AURA') drawAuraTheme(ctx);
-    else if (currentTheme === 'GHIBLI') drawGhibliTheme(ctx); // ADD THIS
-    else if (currentTheme === 'QUANTUM') await drawQuantumTheme(ctx); // ADD THIS (Note the await)
-    else drawNeonTheme(ctx); 
+    else if (currentTheme === 'GHIBLI') drawGhibliTheme(ctx);
+    else if (currentTheme === 'QUANTUM') await drawQuantumTheme(ctx);
+    else drawNeonTheme(ctx); // This MUST be the last else
+
     return canvas;
   };
 

@@ -84,7 +84,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogo
 
       {/* Header */}
       <div className={`w-full mb-6 text-center md:text-left ${lobbyCount > 0 ? '' : 'pt-8'}`}>
-        <h1 className="text-3xl font-bold mb-2">Configure Session</h1>
+        <h1 className="text-3xl font-bold mb-2"></h1>
         <p className="text-slate-400">Choose your focus area and time block to find a match.</p>
       </div>
 

@@ -179,12 +179,23 @@ const handleSplashComplete = () => {
     setCurrentScreen(Screen.DASHBOARD);
   };
 
-  const handleEndSession = () => {
+const handleEndSession = () => {
     setPartner(null);
     setSessionId(null);
     setCurrentScreen(Screen.DASHBOARD);
   };
 
+  // 1. CHECK FOR LANDING PAGE (Render without Layout)
+  if (currentScreen === Screen.LANDING) {
+    return (
+      <Landing 
+        onGetStarted={() => setCurrentScreen(Screen.LOGIN)}
+        onSignIn={() => setCurrentScreen(Screen.LOGIN)}
+      />
+    );
+  }
+
+  // 2. RENDER EVERYTHING ELSE (Inside Layout)
   return (
     <Layout
       user={user} 
@@ -192,24 +203,18 @@ const handleSplashComplete = () => {
       onLogout={handleLogout} 
       onAdminClick={() => setCurrentScreen(Screen.ADMIN)}
     >
-  {currentScreen === Screen.SPLASH && <Splash onComplete={handleSplashComplete} />}
+      {currentScreen === Screen.SPLASH && <Splash onComplete={handleSplashComplete} />}
 
-{currentScreen === Screen.LANDING && (
-  <Landing 
-    onGetStarted={() => setCurrentScreen(Screen.LOGIN)}
-    onSignIn={() => setCurrentScreen(Screen.LOGIN)}
-  />
-)}
+      {currentScreen === Screen.LOGIN && <Login onLogin={() => {}} />}
 
-{currentScreen === Screen.LOGIN && <Login onLogin={() => {}} />}
-
-{currentScreen === Screen.DASHBOARD && user && (
-  <Dashboard 
-    user={user} 
-    onStartMatch={handleStartMatch}
-    onLogout={handleLogout} 
-  />
-)}
+      {currentScreen === Screen.DASHBOARD && user && (
+        <Dashboard 
+          user={user} 
+          onStartMatch={handleStartMatch}
+          onLogout={handleLogout} 
+        />
+      )}
+      
       {currentScreen === Screen.MATCHING && user && (
         <Matching 
           user={user}
@@ -244,4 +249,5 @@ const handleSplashComplete = () => {
     </Layout>
   );
 };
+
 export default App;

@@ -2,9 +2,9 @@ import React, { useState } from 'react';
 import { Button } from '../components/Button';
 import { User } from '../types';
 import { auth, db, googleProvider } from '../utils/firebaseConfig';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, signInWithPopup, sendEmailVerification } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, signInWithPopup, sendEmailVerification, sendPasswordResetEmail } from 'firebase/auth'; 
 import { doc, setDoc, getDoc } from 'firebase/firestore';
-import { Lock, Mail, User as UserIcon, AlertCircle, CheckCircle2, Chrome, FileText, X, ShieldCheck, ArrowLeft } from 'lucide-react';
+import { Lock, Mail, User as UserIcon, AlertCircle, CheckCircle2, Chrome, FileText, X, ShieldCheck, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { AuthMascot } from '../components/AuthMascot';
 import { Logo } from '../components/Logo';
 
@@ -26,6 +26,27 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onBack }) => {
   const [error, setError] = useState('');
   const [signupSuccess, setSignupSuccess] = useState(false);
 
+  // --- NEW STATE FOR PASSWORD VISIBILITY ---
+  const [showPassword, setShowPassword] = useState(false);
+
+  // --- NEW FUNCTION FOR FORGOT PASSWORD ---
+  const handleForgotPassword = async () => {
+    if (!email) {
+      setError("Please enter your email address above to reset your password.");
+      return;
+    }
+    try {
+      setIsLoading(true);
+      await sendPasswordResetEmail(auth, email);
+      alert("Password reset email sent! Check your inbox.");
+      setError(""); // Clear any previous errors
+    } catch (err: any) {
+      console.error(err);
+      setError(getFriendlyError(err.code));
+    } finally {
+      setIsLoading(false);
+    }
+  };
   // Helper to map Firebase errors to friendly text
   const getFriendlyError = (code: string) => {
       switch (code) {
@@ -318,11 +339,43 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onBack }) => {
                 <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2.5 pl-10 pr-4 text-white text-sm" placeholder="you@example.com" required />
                 </div>
             </div>
-            <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-400 uppercase ml-1">Password</label>
+          <div className="space-y-1">
+                <div className="flex justify-between items-center">
+                    <label className="text-xs font-medium text-slate-400 uppercase ml-1">Password</label>
+                    {/* Forgot Password Link (Only shows in Login mode) */}
+                    {!isSignup && (
+                        <button 
+                            type="button"
+                            onClick={handleForgotPassword}
+                            className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                        >
+                            Forgot password?
+                        </button>
+                    )}
+                </div>
                 <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
-                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} onFocus={() => setIsPasswordFocus(true)} onBlur={() => setIsPasswordFocus(false)} className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2.5 pl-10 pr-4 text-white text-sm" placeholder="••••••••" required />
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+                    
+                    {/* Input type is now dynamic based on showPassword */}
+                    <input 
+                        type={showPassword ? "text" : "password"} 
+                        value={password} 
+                        onChange={(e) => setPassword(e.target.value)} 
+                        onFocus={() => setIsPasswordFocus(true)} 
+                        onBlur={() => setIsPasswordFocus(false)} 
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2.5 pl-10 pr-10 text-white text-sm" // changed pr-4 to pr-10
+                        placeholder="••••••••" 
+                        required 
+                    />
+
+                    {/* Eye Toggle Button */}
+                    <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors"
+                    >
+                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
                 </div>
             </div>
             {isSignup && (

@@ -30,7 +30,7 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
   // --- 2. GENERATE LIVE PREVIEW ---
   useEffect(() => {
     const timer = setTimeout(() => {
-      ().then(canvas => {
+      generateCanvas().then(canvas => {
         if (canvas) setPreviewUrl(canvas.toDataURL());
       });
     }, 100);
@@ -38,7 +38,7 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
   }, [currentTheme, neonVariant, user, partner, duration, completedCount]);
 
   // --- CANVAS GENERATOR ---
-  const  = async (): Promise<HTMLCanvasElement | null> => {
+  const generateCanvas = async (): Promise<HTMLCanvasElement | null> => {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
@@ -63,7 +63,7 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
 
   // --- HANDLERS ---
   const handleDownload = async () => {
-    const canvas = await ();
+    const canvas = await generateCanvas();
     if (!canvas) return;
 
     const link = document.createElement('a');
@@ -76,7 +76,7 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
 
   const handleShare = async () => {
     setIsSharing(true);
-    const canvas = await ();
+    const canvas = await generateCanvas();
     if (!canvas) { setIsSharing(false); return; }
 
     canvas.toBlob(async (blob) => {

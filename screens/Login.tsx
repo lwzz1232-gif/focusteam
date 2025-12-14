@@ -116,12 +116,10 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onBack }) => {
                 });
             }
 
-            // ENHANCED FLOW: If Signup, force logout and show success screen
+           // FIX: Don't sign out. Just let the App redirect them to Dashboard automatically.
             if (isSignup && !isGoogle) {
-                await auth.signOut(); // Force logout so they have to login manually
-                setSignupSuccess(true);
-            } else {
-                 // Login success handled by global auth listener
+                 // We do nothing here. The App.tsx will detect the new user 
+                 // and send them to the Dashboard instantly.
             }
         }
 

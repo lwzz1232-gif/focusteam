@@ -36,6 +36,18 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
     }, 100);
     return () => clearTimeout(timer);
   }, [currentTheme, neonVariant, user, partner, duration, completedCount]);
+const applyGrain = (ctx: CanvasRenderingContext2D, opacity: number) => {
+    const w = ctx.canvas.width;
+    const h = ctx.canvas.height;
+    const iData = ctx.getImageData(0, 0, w, h);
+    for (let i = 0; i < iData.data.length; i += 4) {
+      const grain = (Math.random() - 0.5) * (opacity * 255);
+      iData.data[i] = Math.max(0, Math.min(255, iData.data[i] + grain));
+      iData.data[i + 1] = Math.max(0, Math.min(255, iData.data[i + 1] + grain));
+      iData.data[i + 2] = Math.max(0, Math.min(255, iData.data[i + 2] + grain));
+    }
+    ctx.putImageData(iData, 0, 0);
+  };
 
  // --- CANVAS GENERATOR ---
   const generateCanvas = async (): Promise<HTMLCanvasElement | null> => {
@@ -199,174 +211,120 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
   };
 
 // --- THEME 5: GHIBLI (Anime Aesthetic) ---
+ // --- THEME 5: ETHEREAL (Dreamy/Film Look) ---
   const drawGhibliTheme = (ctx: CanvasRenderingContext2D) => {
-    // 1. Anime Sky Gradient
-    const sky = ctx.createLinearGradient(0, 0, 0, 1920);
-    sky.addColorStop(0, '#3b82f6'); // Deep Blue
-    sky.addColorStop(0.6, '#93c5fd'); // Light Blue
-    sky.addColorStop(1, '#e0f2fe'); // White-ish horizon
-    ctx.fillStyle = sky;
+    // 1. Soft Mesh Gradient Background
+    const grad = ctx.createLinearGradient(0, 0, 1080, 1920);
+    grad.addColorStop(0, '#ffecd2');     // Cream
+    grad.addColorStop(0.5, '#fcb69f');   // Soft Peach
+    grad.addColorStop(1, '#a8c0ff');     // Periwinkle
+    ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 1080, 1920);
 
-    // 2. Procedural Fluffy Clouds
-    const drawCloud = (cx: number, cy: number, scale: number) => {
-        ctx.fillStyle = '#ffffff';
-        ctx.shadowColor = 'rgba(255,255,255,0.8)';
-        ctx.shadowBlur = 20;
-        ctx.beginPath();
-        ctx.arc(cx, cy, 60 * scale, 0, Math.PI * 2);
-        ctx.arc(cx + 50 * scale, cy - 20 * scale, 70 * scale, 0, Math.PI * 2);
-        ctx.arc(cx + 90 * scale, cy, 60 * scale, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = 0;
-    };
-    
-    // Draw background clouds
-    drawCloud(200, 400, 1.5);
-    drawCloud(800, 600, 2.0);
-    drawCloud(500, 200, 1.2);
+    // 2. Abstract "Sun" Orbs (Blurred)
+    ctx.filter = 'blur(80px)'; // Heavy blur for "aura" look
+    ctx.fillStyle = '#ff9a9e';
+    ctx.beginPath(); ctx.arc(800, 400, 300, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#a18cd1';
+    ctx.beginPath(); ctx.arc(200, 1500, 400, 0, Math.PI * 2); ctx.fill();
+    ctx.filter = 'none'; // Reset filter
 
-    // 3. Grassy Hill
-    ctx.fillStyle = '#4ade80'; // Bright Anime Green
-    ctx.beginPath();
-    ctx.moveTo(0, 1920);
-    ctx.lineTo(0, 1400);
-    ctx.bezierCurveTo(300, 1350, 700, 1250, 1080, 1450); // Rolling hill curve
-    ctx.lineTo(1080, 1920);
-    ctx.fill();
-    
-    // Hill Shadow/Texture
-    ctx.fillStyle = 'rgba(21, 128, 61, 0.1)';
-    ctx.fillRect(0, 1400, 1080, 520);
+    // 3. Apply Film Grain (Texture is key for aesthetic)
+    applyGrain(ctx, 0.08);
 
-    // 4. "Soot Sprites" (Little cute black dots)
-    const drawSoot = (x: number, y: number) => {
-        ctx.fillStyle = '#111';
-        ctx.beginPath(); ctx.arc(x, y, 20, 0, Math.PI*2); ctx.fill(); // Body
-        ctx.fillStyle = '#fff';
-        ctx.beginPath(); ctx.arc(x-5, y-5, 6, 0, Math.PI*2); ctx.fill(); // Left Eye
-        ctx.beginPath(); ctx.arc(x+5, y-5, 6, 0, Math.PI*2); ctx.fill(); // Right Eye
-        ctx.fillStyle = '#000';
-        ctx.beginPath(); ctx.arc(x-5, y-5, 2, 0, Math.PI*2); ctx.fill(); // Pupil
-        ctx.beginPath(); ctx.arc(x+5, y-5, 2, 0, Math.PI*2); ctx.fill(); // Pupil
-    };
-    drawSoot(200, 1500); drawSoot(230, 1480); drawSoot(260, 1510);
-    
-    // 5. Typography
+    // 4. Elegant Typography (Serif)
     ctx.textAlign = 'center';
-    ctx.fillStyle = '#1e3a8a';
-    ctx.font = 'bold 60px serif'; 
-    ctx.fillText("The Wind Rises...", 540, 300);
+    ctx.fillStyle = '#1c1917';
     
-    ctx.fillStyle = '#fff';
-    ctx.font = '900 300px serif';
-    ctx.shadowColor = 'rgba(0,0,0,0.1)'; ctx.shadowOffsetX = 10; ctx.shadowOffsetY = 10;
-    ctx.fillText(`${Math.round(duration)}`, 540, 900);
-    ctx.shadowColor = 'transparent';
-    
-    ctx.font = 'italic 50px serif';
-    ctx.fillStyle = '#1e3a8a';
-    ctx.fillText("minutes of journey", 540, 1000);
+    // Top Date
+    ctx.font = '50px "Times New Roman", serif';
+    ctx.letterSpacing = '5px';
+    ctx.fillText(new Date().toLocaleDateString().toUpperCase(), 540, 200);
 
-    // Card Info
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-    ctx.roundRect(140, 1100, 800, 200, 20);
-    ctx.fill();
+    // Big Center Stats
+    ctx.font = 'italic 80px "Times New Roman", serif';
+    ctx.fillText("Time in flow", 540, 800);
     
-    ctx.fillStyle = '#1e3a8a';
-    ctx.font = '40px sans-serif';
-    ctx.fillText(`Traveler: ${user.name}`, 540, 1180);
-    ctx.fillText(`Companion: ${partner.name}`, 540, 1240);
+    ctx.font = '350px "Times New Roman", serif';
+    ctx.letterSpacing = '-15px'; // Tight kerning looks expensive
+    ctx.fillText(`${Math.round(duration)}`, 540, 1100);
+    
+    ctx.font = '50px "Times New Roman", serif';
+    ctx.letterSpacing = '10px';
+    ctx.fillText("MINUTES", 540, 1200);
+
+    // Bottom info
+    ctx.strokeStyle = '#1c1917';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(440, 1600); ctx.lineTo(640, 1600); ctx.stroke();
+    
+    ctx.font = '40px "Times New Roman", serif';
+    ctx.letterSpacing = '2px';
+    ctx.fillText(`WITH ${partner.name.toUpperCase()}`, 540, 1680);
   };
 // --- THEME 6: QUANTUM (Three.js 3D Render) ---
+// --- THEME 6: TERMINAL (Swiss/Brutalist Data) ---
   const drawQuantumTheme = async (ctx: CanvasRenderingContext2D) => {
-    // 1. Background
-    ctx.fillStyle = '#000000';
+    // 1. Solid Matte Background
+    ctx.fillStyle = '#09090b'; // Zinc-950
     ctx.fillRect(0, 0, 1080, 1920);
 
-    // 2. Setup Temporary Three.js Scene
-    const width = 1080; 
-    const height = 1920;
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
-    camera.position.z = 5;
-
-    const renderer = new THREE.WebGLRenderer({ alpha: true, preserveDrawingBuffer: true });
-    renderer.setSize(width, height);
-
-    // 3. Create 3D Object (Icosahedron Wireframe)
-    const geometry = new THREE.IcosahedronGeometry(2.5, 1);
-    const material = new THREE.MeshBasicMaterial({ 
-        color: 0x00ffff, 
-        wireframe: true, 
-        transparent: true, 
-        opacity: 0.8 
-    });
-    const sphere = new THREE.Mesh(geometry, material);
-    scene.add(sphere);
-
-    // Inner glowing core
-    const coreGeo = new THREE.IcosahedronGeometry(1.5, 0);
-    const coreMat = new THREE.MeshBasicMaterial({ color: 0xff00ff, wireframe: true });
-    const core = new THREE.Mesh(coreGeo, coreMat);
-    scene.add(core);
-
-    // Particles
-    const particlesGeo = new THREE.BufferGeometry();
-    const particleCount = 200;
-    const posArray = new Float32Array(particleCount * 3);
-    for(let i = 0; i < particleCount * 3; i++) {
-        posArray[i] = (Math.random() - 0.5) * 15;
-    }
-    particlesGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
-    const particlesMat = new THREE.PointsMaterial({ size: 0.05, color: 0xffffff });
-    const particlesMesh = new THREE.Points(particlesGeo, particlesMat);
-    scene.add(particlesMesh);
-
-    // 4. Random Rotation based on duration (so it's unique every time)
-    sphere.rotation.x = Math.random() * Math.PI;
-    sphere.rotation.y = Math.random() * Math.PI;
-    core.rotation.x = -sphere.rotation.x;
-
-    // 5. Render to Image
-    renderer.render(scene, camera);
-    const dataURL = renderer.domElement.toDataURL('image/png');
+    // 2. The Grid System
+    ctx.strokeStyle = '#3f3f46'; // Zinc-700
+    ctx.lineWidth = 2;
+    // Draw vertical lines
+    ctx.beginPath(); ctx.moveTo(50, 0); ctx.lineTo(50, 1920); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(1030, 0); ctx.lineTo(1030, 1920); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(540, 500); ctx.lineTo(540, 1400); ctx.stroke();
     
-    // 6. Draw 3D Image onto 2D Canvas
-    const img = new Image();
-    img.src = dataURL;
-    await new Promise(r => { img.onload = r; });
-    ctx.drawImage(img, 0, 0);
+    // Draw horizontal dividers
+    ctx.beginPath(); ctx.moveTo(0, 1400); ctx.lineTo(1080, 1400); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, 500); ctx.lineTo(1080, 500); ctx.stroke();
 
-    // Cleanup Three.js
-    renderer.dispose();
-    geometry.dispose();
-    material.dispose();
-
-    // 7. Overlay HUD Text (Cyberpunk Style)
-    ctx.font = 'bold 100px "Courier New", monospace';
-    ctx.fillStyle = '#00ffff';
+    // 3. Header Info (Monospace)
+    ctx.fillStyle = '#e4e4e7'; // Zinc-200
+    ctx.font = 'bold 40px "Courier New", monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText("SESSION_LOG_ID: " + Date.now().toString().slice(-6), 80, 100);
+    ctx.fillText("STATUS: COMPLETED", 80, 160);
+    
+    // 4. The Big Data
     ctx.textAlign = 'center';
-    ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 20;
-    ctx.fillText("QUANTUM SYNC", 540, 300);
-    
-    ctx.font = 'bold 300px sans-serif';
+    ctx.font = 'bold 600px Helvetica, Arial, sans-serif'; // Massive Sans-serif
+    ctx.letterSpacing = '-30px';
     ctx.fillStyle = '#ffffff';
-    ctx.shadowColor = '#ff00ff'; ctx.shadowBlur = 40;
-    ctx.fillText(`${Math.round(duration)}`, 540, 950);
+    ctx.fillText(`${Math.round(duration)}`, 540, 1050);
     
-    ctx.shadowBlur = 0;
+    ctx.font = 'bold 50px "Courier New", monospace';
+    ctx.letterSpacing = '10px';
+    ctx.fillStyle = '#22c55e'; // Matrix Green accent
+    ctx.fillText("MINUTES_SYNCED", 540, 1200);
+
+    // 5. Grid Stats
+    ctx.textAlign = 'left';
     ctx.font = '40px "Courier New", monospace';
-    ctx.fillStyle = '#00ffff';
-    ctx.fillText(`// PROTOCOL: COMPLETE`, 540, 1100);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(`USER: ${user.name}`, 540, 1600);
-    ctx.fillText(`LINK: ${partner.name}`, 540, 1660);
+    ctx.letterSpacing = '0px';
+    ctx.fillStyle = '#71717a'; // Zinc-500
     
-    // Draw Border
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 5;
-    ctx.strokeRect(50, 50, 980, 1820);
+    // Left Box
+    ctx.fillText("OPERATOR", 80, 1480);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(user.name.toUpperCase(), 80, 1550);
+
+    // Right Box
+    ctx.fillStyle = '#71717a';
+    ctx.fillText("LINKED_NODE", 570, 1480);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(partner.name.toUpperCase(), 570, 1550);
+
+    // 6. Fake Barcode at bottom
+    ctx.fillStyle = '#ffffff';
+    let x = 80;
+    while (x < 1000) {
+        const w = Math.random() * 10 + 2;
+        ctx.fillRect(x, 1750, w, 100);
+        x += w + Math.random() * 10;
+    }
   };
   
   const drawRoundedRect = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) => {
@@ -413,8 +371,8 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
                 { id: 'NEON', icon: <Zap size={16}/>, label: 'Neon' },
                 { id: 'ZEN', icon: <Flower2 size={16}/>, label: 'Zen' },
                 { id: 'AURA', icon: <Music size={16}/>, label: 'Aura' },
-                { id: 'GHIBLI', icon: <CloudSun size={16}/>, label: 'Ghibli' },
-                { id: 'QUANTUM', icon: <Box size={16}/>, label: '3D' },
+                { id: 'GHIBLI', icon: <CloudSun size={16}/>, label: 'Film' },
+                { id: 'QUANTUM', icon: <Box size={16}/>, label: 'Data' },
             ].map((t) => (
                 <button
                     key={t.id}

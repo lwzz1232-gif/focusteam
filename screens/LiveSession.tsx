@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Partner, SessionPhase, User, SessionConfig, SessionDuration, TodoItem } from '../types';
 import { Button } from '../components/Button';
 import { generateIcebreaker } from '../services/geminiService';
-import { Mic, MicOff, Video, VideoOff, Sparkles, LogOut, User as UserIcon, MessageSquare, ListChecks, Flag, X, AlertTriangle, HeartCrack, CheckCircle2, Flame, ThumbsUp, Hand } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, Sparkles, LogOut, User as UserIcon, MessageSquare, ListChecks, Flag, X, AlertTriangle, HeartCrack, Flame, ThumbsUp, Hand, Maximize2, Minimize2 } from 'lucide-react';
 import { ChatWindow } from '../components/ChatWindow';
 import { TaskBoard } from '../components/TaskBoard';
 import { SessionRecap } from '../components/SessionRecap';
@@ -11,8 +11,8 @@ import { useWebRTC } from '../hooks/useWebRTC';
 import { db } from '../utils/firebaseConfig';
 import { collection, query, where, updateDoc, doc, addDoc, onSnapshot, deleteDoc, serverTimestamp, increment } from 'firebase/firestore';
 
-// --- NEW: REALISTIC FIRE ENGINE (Canvas) ---
-const FireCanvas = ({ active }: { active: boolean }) => {
+// --- VISUAL: CINEMATIC EMBERS (The "Cool" Fire) ---
+const EmbersCanvas = ({ active }: { active: boolean }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -21,75 +21,68 @@ const FireCanvas = ({ active }: { active: boolean }) => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    // High DPI scaling
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+    ctx.scale(dpr, dpr);
 
     const particles: any[] = [];
-    const particleCount = 150; // Density of fire
+    const particleCount = 60; // Less is more
 
-    // Initialize Particles
     for (let i = 0; i < particleCount; i++) {
       particles.push({
-        x: Math.random() * canvas.width,
-        y: canvas.height + Math.random() * 100,
-        vx: (Math.random() - 0.5) * 2, // Drift left/right
-        vy: Math.random() * -5 - 2,    // Upward speed
-        life: Math.random() * 100,
-        size: Math.random() * 6 + 2,
-        color: `hsl(${Math.random() * 40 + 10}, 100%, 50%)` // Orange/Yellow range
+        x: Math.random() * window.innerWidth,
+        y: window.innerHeight + Math.random() * 100,
+        speed: Math.random() * 1.5 + 0.5,
+        size: Math.random() * 2 + 0.5, // Tiny embers
+        opacity: Math.random(),
+        swing: Math.random() * 2 // Horizontal drift
       });
     }
 
     let animationId: number;
+    let time = 0;
 
     const animate = () => {
-      // Create fade effect (trails)
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      ctx.globalCompositeOperation = 'lighter'; // Makes fire glow when particles overlap
+      time += 0.01;
+      ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
 
-      for (let i = 0; i < particles.length; i++) {
-        const p = particles[i];
-        
-        // Physics
-        p.x += p.vx;
-        p.y += p.vy;
-        p.life -= 1.5;
-        p.size *= 0.98; // Shrink as they rise
+      // Warm Amber Overlay (Subtle)
+      const gradient = ctx.createLinearGradient(0, window.innerHeight, 0, 0);
+      gradient.addColorStop(0, 'rgba(255, 80, 0, 0.15)'); // Orange bottom
+      gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
 
-        // Reset dead particles if "active" is still true (continuous fire)
-        // OR let them die out naturally if just a burst
-        if (p.life <= 0) {
-            // Respawn at bottom
-            p.x = Math.random() * canvas.width;
-            p.y = canvas.height + 20;
-            p.life = 100;
-            p.size = Math.random() * 6 + 2;
-            p.vy = Math.random() * -5 - 2;
+      ctx.fillStyle = '#FFD700'; // Gold color
+
+      particles.forEach(p => {
+        p.y -= p.speed;
+        p.x += Math.sin(time + p.swing) * 0.5; // Gentle sway
+        p.opacity -= 0.003;
+
+        if (p.y < 0 || p.opacity <= 0) {
+          p.y = window.innerHeight + 10;
+          p.x = Math.random() * window.innerWidth;
+          p.opacity = 1;
         }
 
-        // Draw
+        ctx.globalAlpha = p.opacity;
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        
-        // Dynamic Color: Yellow at bottom -> Red at top
-        const hue = 10 + (p.y / canvas.height) * 40; 
-        ctx.fillStyle = `hsla(${hue}, 100%, 60%, ${p.life / 100})`;
         ctx.fill();
-      }
+      });
 
       animationId = requestAnimationFrame(animate);
     };
-
     animate();
 
     return () => cancelAnimationFrame(animationId);
   }, [active]);
 
   if (!active) return null;
-  return <canvas ref={canvasRef} className="absolute inset-0 z-20 pointer-events-none fade-in duration-500" />;
+  return <canvas ref={canvasRef} className="absolute inset-0 z-20 pointer-events-none fade-in duration-1000" style={{ width: '100%', height: '100%' }} />;
 };
 
 interface LiveSessionProps {
@@ -106,10 +99,10 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   // --- LOGIC STATE ---
   const [phase, setPhase] = useState<SessionPhase>(SessionPhase.ICEBREAKER);
   const [timeLeft, setTimeLeft] = useState(isTest ? 30 : config.preTalkMinutes * 60); 
-  const [startTime] = useState(Date.now());
   const [isInitiator, setIsInitiator] = useState(false);
   const [isReadyForWebRTC, setIsReadyForWebRTC] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
+  const [startTime] = useState(Date.now());
 
   const phaseRef = useRef<SessionPhase>(SessionPhase.ICEBREAKER);
   const phaseStartTimeRef = useRef<number | null>(null);
@@ -123,25 +116,22 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [isTaskBoardOpen, setIsTaskBoardOpen] = useState(false);
-  const [showUI, setShowUI] = useState(true); 
   
-  // REPLACED: Simple Aura -> Realistic Fire State
+  // NEW: Controls visibility (Cinematic Mode)
+  const [showControls, setShowControls] = useState(true); 
+  
+  // REPLACED: Aura with Fire State
   const [isFireActive, setIsFireActive] = useState(false);
-  const [aura, setAura] = useState<'neutral' | 'power' | 'wave' | null>(null);
-
+  
   const [floatingMessages, setFloatingMessages] = useState<{id: string, text: string, sender: string}[]>([]);
   const [isInteracting, setIsInteracting] = useState(false);
-
-  // EXIT MODAL STATE
   const [exitModalStep, setExitModalStep] = useState<0 | 1 | 2>(0); 
-
-  // Report State
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState('Inappropriate Behavior');
   const [reportDetails, setReportDetails] = useState('');
 
-  // Draggable Self-Video State
-  const [selfPos, setSelfPos] = useState({ x: 20, y: 100 }); 
+  // Draggable Self-Video
+  const [selfPos, setSelfPos] = useState({ x: 24, y: 24 }); 
   const [isDragging, setIsDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
 
@@ -155,7 +145,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const fireTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastMsgCount = useRef(0); 
 
-  // --- POMODORO LOGIC START ---
+  // --- POMODORO LOGIC ---
   const calculatedFocusDuration = isTest ? 30 : config.duration * 60;
   const isPomodoroMode = (config as any).mode === 'POMODORO' || (config as any).mode === 1;
 
@@ -210,8 +200,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           prevPomodoroBreak.current = isPomodoroBreak;
       }
   }, [isPomodoroBreak, phase]);
-  // --- POMODORO LOGIC END ---
 
+  // --- STANDARD LOGIC ---
   useEffect(() => {
     if (!sessionId || !user.id || !partner.id) return;
     const amICaller = user.id < partner.id;
@@ -274,32 +264,29 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     return () => unsub();
   }, [sessionId, user.id, config, isTest]);
 
+  // --- MOUSE MOVEMENT (Hide Controls) ---
   useEffect(() => {
       const handleMouseMove = () => {
-          setShowUI(true);
-          if (phase === SessionPhase.FOCUS) {
-              if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-              if (!isInteracting) {
-                  controlsTimeoutRef.current = setTimeout(() => setShowUI(false), 2000);
-              }
+          setShowControls(true);
+          if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+          if (!isInteracting) {
+              controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 2500);
           }
       };
 
       if (isInteracting) {
-          setShowUI(true);
+          setShowControls(true);
           if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
       } else {
           handleMouseMove();
       }
 
       window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('touchstart', handleMouseMove); 
       return () => {
           window.removeEventListener('mousemove', handleMouseMove);
-          window.removeEventListener('touchstart', handleMouseMove);
           if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
       };
-  }, [phase, isInteracting]); 
+  }, [isInteracting]); 
 
   useEffect(() => {
     if (phase === SessionPhase.COMPLETED) return;
@@ -329,7 +316,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
   const handleReaction = async (emoji: string) => {
       const now = Date.now();
-      if (now - lastReactionTime.current < 2000) return; // Slower cooldown for spam prevention
+      if (now - lastReactionTime.current < 2000) return; 
       lastReactionTime.current = now;
 
       triggerVisuals(emoji);
@@ -343,10 +330,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       if (emoji === '🔥') {
           setIsFireActive(true);
           if (fireTimeoutRef.current) clearTimeout(fireTimeoutRef.current);
-          fireTimeoutRef.current = setTimeout(() => setIsFireActive(false), 4000); // 4s Fire duration
+          fireTimeoutRef.current = setTimeout(() => setIsFireActive(false), 5000); // 5s Embers
       } else {
-          setAura(emoji === '💯' ? 'power' : 'wave');
-          setTimeout(() => setAura(null), 2500);
+          // You can add logic for other emojis here if needed
       }
   };
 
@@ -417,6 +403,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
   const activePartnerTask = partnerTasks.find(t => !t.completed)?.text;
 
+  // --- DRAG LOGIC ---
   const handleStartDrag = (clientX: number, clientY: number) => {
       setIsDragging(true);
       dragStart.current = { x: clientX - selfPos.x, y: clientY - selfPos.y };
@@ -481,24 +468,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       finishSession(true);
   };
 
-  // --- UI HELPER: Dynamic Ambient Light based on State ---
-  const getAmbientLight = () => {
-      if (isPomodoroBreak) return 'shadow-[0_0_100px_rgba(16,185,129,0.3)] border-emerald-500/30'; // Green during break
-      if (phase === SessionPhase.FOCUS) return 'shadow-[0_0_100px_rgba(59,130,246,0.15)] border-blue-500/10'; // Deep Blue during focus
-      return 'shadow-[0_0_80px_rgba(255,255,255,0.1)] border-white/10'; // Neutral
-  };
-
   return (
-    <div className="absolute inset-0 bg-black overflow-hidden select-none font-sans">
-      
-      <style>{`
-        @keyframes messageFloatUp {
-          0% { transform: translateY(20px) scale(0.95); opacity: 0; }
-          10% { transform: translateY(0) scale(1); opacity: 1; }
-          90% { transform: translateY(-10px) scale(1); opacity: 1; }
-          100% { transform: translateY(-20px) scale(0.95); opacity: 0; }
-        }
-      `}</style>
+    <div className="absolute inset-0 bg-black overflow-hidden select-none font-sans text-white">
       
       {phase === SessionPhase.COMPLETED && (
           <div className="absolute inset-0 z-50">
@@ -506,277 +477,204 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           </div>
       )}
 
-      {/* --- REALISTIC FIRE OVERLAY --- */}
-      <FireCanvas active={isFireActive} />
+      {/* --- CINEMATIC FIRE LAYER --- */}
+      <EmbersCanvas active={isFireActive} />
 
-      {/* --- PARTNER VIDEO (MAIN) --- */}
-      <div className={`absolute inset-0 z-10 transition-all duration-[1500ms] ease-in-out border-2 ${getAmbientLight()} ${phase === SessionPhase.FOCUS ? 'scale-[0.98] rounded-3xl overflow-hidden' : ''}`}>
+      {/* --- BACKGROUND VIDEO (PARTNER) --- */}
+      {/* Full screen, no borders, pure immersion */}
+      <div className="absolute inset-0 z-0 bg-slate-900">
           {remoteStream ? (
               <video 
                 ref={partnerVideoRef} 
                 autoPlay 
                 playsInline 
                 onLoadedMetadata={(e) => (e.target as HTMLVideoElement).play()}
-                className="w-full h-full object-cover" 
+                className={`w-full h-full object-cover transition-all duration-1000 ${isFireActive ? 'brightness-110 sepia-[0.3]' : 'brightness-90'}`}
               />
           ) : (
-              <div className="flex flex-col items-center justify-center h-full gap-6 bg-slate-900">
-                  <div className="relative">
-                      <div className="absolute inset-0 bg-blue-500 blur-2xl opacity-20 animate-pulse"></div>
-                      <div className="w-24 h-24 rounded-full bg-slate-800 flex items-center justify-center relative z-10 border border-slate-700">
-                          <UserIcon size={40} className="text-slate-500" />
+              <div className="flex items-center justify-center h-full">
+                  <div className="flex flex-col items-center gap-4 opacity-50">
+                      <div className="w-16 h-16 rounded-full border-2 border-white/20 flex items-center justify-center animate-pulse">
+                          <UserIcon className="text-white/50" />
                       </div>
-                  </div>
-                  <div className="flex flex-col items-center gap-2">
-                      <span className="text-slate-400 font-medium tracking-widest text-sm uppercase">Connecting</span>
-                      <div className="flex gap-1">
-                          <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '0s'}}></div>
-                          <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
-                          <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
-                      </div>
+                      <span className="text-xs uppercase tracking-[0.3em] text-white/50">Establishing Link</span>
                   </div>
               </div>
           )}
           
-          {/* Cinematic Gradient at bottom for legibility */}
-          <div className="absolute bottom-0 left-0 right-0 h-48 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
-
-          {/* Simple reaction popups (Non-Fire) */}
-          {aura && aura !== 'neutral' && (
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
-                  <div className="text-8xl animate-[messageFloatUp_1s_ease-out_forwards]">
-                      {aura === 'power' ? '💯' : '👋'}
-                  </div>
-              </div>
-          )}
-
-          {activePartnerTask && showUI && (
-              <div className="absolute bottom-32 left-0 right-0 flex justify-center pointer-events-none animate-in fade-in slide-in-from-bottom-2 z-30">
-                   <div className="bg-black/30 backdrop-blur-md border border-white/5 px-4 py-2 rounded-full flex items-center gap-3">
-                        <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_10px_#10b981]" />
-                        <span className="text-xs text-slate-300 font-medium tracking-wide">
-                            {partner.name} is focusing on <span className="text-white font-bold">{activePartnerTask}</span>
-                        </span>
-                   </div>
-              </div>
-          )}
+          {/* Gradient Overlay for Text Readability */}
+          <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/80 pointer-events-none" />
       </div>
 
-      {/* --- SELF VIDEO (Draggable PIP Style) --- */}
+      {/* --- SELF VIDEO (FLOATING PIP) --- */}
+      {/* Clean, sharp edges, minimalist */}
       <div 
         onMouseDown={handleMouseDown}
         onTouchStart={handleTouchStart}
         style={{ transform: `translate3d(${selfPos.x}px, ${selfPos.y}px, 0)` }}
-        className={`absolute top-0 left-0 w-28 md:w-40 aspect-[9/16] bg-black rounded-2xl overflow-hidden shadow-2xl border border-white/10 z-40 cursor-grab active:cursor-grabbing transition-opacity duration-500 group ${showUI ? 'opacity-100' : 'opacity-40 hover:opacity-100'}`}
+        className={`absolute w-32 md:w-48 aspect-[3/4] bg-black shadow-2xl z-40 cursor-grab active:cursor-grabbing group overflow-hidden transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 md:opacity-100'}`}
       >
-          <video ref={myVideoRef} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]" />
-          {/* Mini Status Bar */}
-          <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/90 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
-              <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-bold text-white tracking-wider">YOU</span>
-                  {!micEnabled && <MicOff size={10} className="text-red-400"/>}
+          <video ref={myVideoRef} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1] opacity-90 group-hover:opacity-100 transition-opacity" />
+          
+          {/* Mute Indicator */}
+          {!micEnabled && (
+              <div className="absolute bottom-2 right-2 w-6 h-6 bg-red-500/80 rounded-full flex items-center justify-center backdrop-blur-md">
+                  <MicOff size={12} className="text-white" />
+              </div>
+          )}
+      </div>
+
+      {/* --- TOP LEFT STATUS --- */}
+      <div className={`absolute top-6 left-6 z-30 transition-opacity duration-500 ${showControls ? 'opacity-100' : 'opacity-0'}`}>
+          <div className="flex items-center gap-4">
+              <div className="flex flex-col">
+                  <span className="text-4xl font-light tracking-tighter tabular-nums font-mono leading-none">
+                      {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
+                  </span>
+                  <span className={`text-[10px] uppercase tracking-[0.3em] font-bold mt-1 ${
+                      phase === SessionPhase.FOCUS 
+                          ? (isPomodoroBreak ? 'text-emerald-400' : 'text-blue-400') 
+                          : 'text-slate-400'
+                  }`}>
+                      {phase === SessionPhase.ICEBREAKER ? 'WARM UP' :
+                       phaseLabel}
+                  </span>
               </div>
           </div>
       </div>
 
+      {/* --- TOP RIGHT TOOLS --- */}
+      <div className={`absolute top-6 right-6 z-30 flex gap-4 transition-opacity duration-500 ${showControls ? 'opacity-100' : 'opacity-0'}`}>
+           <button onClick={() => setIsReportOpen(true)} className="opacity-50 hover:opacity-100 transition-opacity text-white">
+               <Flag size={20} />
+           </button>
+           <button onClick={handleExitClick} className="opacity-50 hover:opacity-100 hover:text-red-500 transition-all text-white">
+               <LogOut size={20} />
+           </button>
+      </div>
+
+      {/* --- BOTTOM CONTROLS (Floating Glass Bar) --- */}
+      <div 
+        className={`absolute bottom-8 left-0 right-0 flex justify-center z-50 transition-all duration-500 transform ${showControls ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'}`}
+        onMouseEnter={() => setIsInteracting(true)}
+        onMouseLeave={() => setIsInteracting(false)}
+      >
+          <div className="bg-black/40 backdrop-blur-xl border border-white/10 px-6 py-3 rounded-full flex items-center gap-6 shadow-2xl">
+              
+              {/* PRIMARY ACTIONS */}
+              <div className="flex items-center gap-3">
+                  <button 
+                      onClick={() => { if (phase !== SessionPhase.FOCUS || isPomodoroBreak) { setMicEnabled(!micEnabled); setManualMicToggle(!micEnabled); }}} 
+                      className={`p-3 rounded-full transition-all ${!micEnabled ? 'bg-red-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}
+                  >
+                      {micEnabled ? <Mic size={20} /> : <MicOff size={20} />}
+                  </button>
+                  <button 
+                      onClick={() => setCamEnabled(!camEnabled)}
+                      className={`p-3 rounded-full transition-all ${!camEnabled ? 'bg-red-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}
+                  >
+                      {camEnabled ? <Video size={20} /> : <VideoOff size={20} />}
+                  </button>
+              </div>
+
+              <div className="w-px h-8 bg-white/10"></div>
+
+              {/* SECONDARY TOOLS */}
+              <div className="flex items-center gap-3">
+                  <button 
+                      onClick={() => { setIsChatOpen(!isChatOpen); setUnreadChatCount(0); }}
+                      className="p-3 rounded-full hover:bg-white/10 text-slate-300 hover:text-white relative"
+                  >
+                      <MessageSquare size={20} />
+                      {unreadChatCount > 0 && <span className="absolute top-2 right-2 w-2 h-2 bg-blue-500 rounded-full"></span>}
+                  </button>
+
+                  <button 
+                      onClick={() => setIsTaskBoardOpen(!isTaskBoardOpen)}
+                      className={`p-3 rounded-full transition-all ${isTaskBoardOpen ? 'text-emerald-400 bg-emerald-500/10' : 'hover:bg-white/10 text-slate-300 hover:text-white'}`}
+                  >
+                      <ListChecks size={20} />
+                  </button>
+                  
+                  {phase === SessionPhase.ICEBREAKER && (
+                     <button 
+                        onClick={async () => { setIsLoadingIcebreaker(true); setIcebreaker(await generateIcebreaker(partner.type)); setIsLoadingIcebreaker(false); }}
+                        className="p-3 rounded-full hover:bg-white/10 text-yellow-400 hover:text-yellow-200"
+                     >
+                        <Sparkles size={20} className={isLoadingIcebreaker ? 'animate-spin' : ''} />
+                     </button>
+                  )}
+              </div>
+
+              <div className="w-px h-8 bg-white/10"></div>
+
+              {/* REACTIONS */}
+              <button 
+                  onClick={() => handleReaction('🔥')}
+                  className={`p-3 rounded-full transition-all hover:bg-orange-500/20 hover:text-orange-400 ${isFireActive ? 'text-orange-500 scale-110' : 'text-slate-400'}`}
+              >
+                  <Flame size={20} fill={isFireActive ? "currentColor" : "none"} />
+              </button>
+          </div>
+      </div>
+
       {/* --- FLOATING CHAT BUBBLES --- */}
-      <div className="absolute bottom-32 left-8 z-30 flex flex-col items-start gap-2 pointer-events-none">
+      <div className="absolute bottom-32 left-8 z-30 flex flex-col items-start gap-3 pointer-events-none">
           {floatingMessages.map(msg => (
-              <div key={msg.id} className="bg-black/50 backdrop-blur-xl border border-white/10 px-4 py-3 rounded-2xl rounded-bl-none shadow-lg animate-[messageFloatUp_6s_ease-out_forwards] max-w-xs">
-                  <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[10px] font-bold text-blue-400 uppercase">{msg.sender}</span>
-                  </div>
-                  <span className="text-white text-sm font-medium">{msg.text}</span>
+              <div key={msg.id} className="bg-black/60 backdrop-blur-md px-4 py-2 rounded-2xl rounded-bl-none border-l-2 border-blue-500 animate-in slide-in-from-left-4 fade-in duration-300 max-w-sm">
+                  <p className="text-white text-sm">{msg.text}</p>
               </div>
           ))}
       </div>
 
-      {/* --- HUD INTERFACE --- */}
-      <div className={`absolute inset-0 pointer-events-none z-50 transition-opacity duration-500 ${showUI ? 'opacity-100' : 'opacity-0'}`}>
-        
-        {/* TIMER PILL (Dynamic Island Style) */}
-        <div className="absolute top-6 left-0 right-0 flex justify-center pointer-events-none">
-            <div className={`backdrop-blur-2xl px-6 py-3 rounded-full flex items-center gap-4 shadow-2xl transition-all duration-700 border ${
-                phase === SessionPhase.FOCUS 
-                    ? (isPomodoroBreak ? 'bg-emerald-950/60 border-emerald-500/30' : 'bg-black/60 border-blue-500/20') 
-                    : 'bg-slate-950/60 border-white/10'
-            }`}>
-                <div className="flex flex-col items-end leading-none">
-                    <span className="font-mono text-2xl font-bold text-white tabular-nums tracking-tight">
-                        {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
-                    </span>
-                </div>
-                <div className="h-8 w-px bg-white/10"></div>
-                <div className="flex flex-col justify-center">
-                    <span className={`text-[10px] font-bold uppercase tracking-[0.2em] ${
-                        phase === SessionPhase.FOCUS 
-                            ? (isPomodoroBreak ? 'text-emerald-400' : 'text-blue-400') 
-                            : 'text-slate-400'
-                    }`}>
-                        {phase === SessionPhase.ICEBREAKER ? 'WARM UP' :
-                         phase === SessionPhase.DEBRIEF ? 'DEBRIEF' :
-                         phaseLabel}
-                    </span>
-                    {phase === SessionPhase.FOCUS && !isPomodoroBreak && (
-                        <span className="text-[9px] text-slate-500 font-medium">STAY IN ZONE</span>
-                    )}
-                </div>
-            </div>
-        </div>
-
-        {/* UTILITY BUTTONS (Report / Exit) */}
-        <div className="absolute top-6 right-6 pointer-events-auto flex gap-3">
-             <button 
-                onClick={() => setIsReportOpen(true)} 
-                className="w-10 h-10 rounded-full bg-black/20 hover:bg-black/60 backdrop-blur-md border border-white/5 hover:border-white/20 text-slate-400 hover:text-white flex items-center justify-center transition-all"
-                title="Report"
-            >
-                <Flag size={16} />
-            </button>
-            <button 
-                onClick={handleExitClick}
-                className="w-10 h-10 rounded-full bg-red-500/10 hover:bg-red-500/20 backdrop-blur-md border border-red-500/20 hover:border-red-500/40 text-red-400 flex items-center justify-center transition-all"
-                title="End Session"
-            >
-                <LogOut size={16} />
-            </button>
-        </div>
-
-        {/* BOTTOM DOCK (Glassmorphism Controls) */}
-        <div className="absolute bottom-8 left-0 right-0 flex justify-center pointer-events-auto">
-             <div className="bg-black/60 backdrop-blur-2xl border border-white/10 rounded-3xl p-2 px-4 shadow-2xl flex items-center gap-3 md:gap-4 transition-transform hover:scale-[1.02]">
-                
-                {/* REACTION BUTTONS */}
-                <div className="flex items-center gap-2 pr-4 border-r border-white/10">
-                    <button 
-                        onClick={() => handleReaction('🔥')} 
-                        className="p-3 rounded-xl hover:bg-white/10 transition-all group relative overflow-hidden"
-                        title="Send Fire"
-                    >
-                        <Flame size={20} className={`text-orange-500 transition-transform group-hover:scale-110 ${isFireActive ? 'animate-bounce' : ''}`} />
-                        {isFireActive && <div className="absolute inset-0 bg-orange-500/20 blur-md"></div>}
-                    </button>
-                    <button onClick={() => handleReaction('💯')} className="p-3 rounded-xl hover:bg-white/10 transition-all text-slate-400 hover:text-white"><ThumbsUp size={20} /></button>
-                    <button onClick={() => handleReaction('👋')} className="p-3 rounded-xl hover:bg-white/10 transition-all text-slate-400 hover:text-white"><Hand size={20} /></button>
-                </div>
-
-                {/* MEDIA CONTROLS */}
-                <div className="flex items-center gap-2">
-                    <button 
-                        onClick={() => { if (phase !== SessionPhase.FOCUS || isPomodoroBreak) { setMicEnabled(!micEnabled); setManualMicToggle(!micEnabled); }}} 
-                        disabled={phase === SessionPhase.FOCUS && !isPomodoroBreak} 
-                        className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${
-                            (phase === SessionPhase.FOCUS && !isPomodoroBreak) 
-                            ? 'opacity-30 cursor-not-allowed bg-white/5' 
-                            : micEnabled 
-                                ? 'bg-white/10 hover:bg-white/20 text-white shadow-inner' 
-                                : 'bg-red-500/20 text-red-400 border border-red-500/30'
-                        }`}
-                    >
-                        {micEnabled && (phase !== SessionPhase.FOCUS || isPomodoroBreak) ? <Mic size={20} /> : <MicOff size={20} />}
-                    </button>
-
-                    <button onClick={() => setCamEnabled(!camEnabled)} className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${camEnabled ? 'bg-white/10 hover:bg-white/20 text-white shadow-inner' : 'bg-red-500/20 text-red-400 border border-red-500/30'}`}>
-                        {camEnabled ? <Video size={20} /> : <VideoOff size={20} />}
-                    </button>
-                </div>
-
-                {/* TOOLS */}
-                <div className="flex items-center gap-2 pl-4 border-l border-white/10">
-                    {phase === SessionPhase.ICEBREAKER && (
-                        <button onClick={async () => { setIsLoadingIcebreaker(true); setIcebreaker(await generateIcebreaker(partner.type)); setIsLoadingIcebreaker(false); }} className="w-12 h-12 rounded-2xl flex items-center justify-center bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 border border-yellow-500/20 transition-all">
-                            <Sparkles size={20} className={isLoadingIcebreaker ? 'animate-spin' : ''}/>
-                        </button>
-                    )}
-
-                    <button onClick={() => { setIsChatOpen(!isChatOpen); setUnreadChatCount(0); }} className="w-12 h-12 rounded-2xl flex items-center justify-center hover:bg-white/10 text-slate-300 hover:text-white relative transition-colors">
-                        <MessageSquare size={20} />
-                        {unreadChatCount > 0 && <span className="absolute top-3 right-3 w-2.5 h-2.5 bg-blue-500 rounded-full border-2 border-black"></span>}
-                    </button>
-
-                    <button onClick={() => setIsTaskBoardOpen(!isTaskBoardOpen)} className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${isTaskBoardOpen ? 'bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)]' : 'hover:bg-white/10 text-slate-300 hover:text-white'}`}>
-                        <ListChecks size={20} />
-                    </button>
-                </div>
-             </div>
-        </div>
-
-        {/* FLOATING WINDOWS (Chat/Tasks) */}
-        <div 
-            className="pointer-events-auto"
-            onMouseEnter={() => setIsInteracting(true)}
-            onMouseLeave={() => setIsInteracting(false)}
-        >
-             <ChatWindow messages={chatMessages} onSendMessage={sendMessage} partnerName={partner.name} isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
-             <TaskBoard isOpen={isTaskBoardOpen} onClose={() => setIsTaskBoardOpen(false)} myTasks={myTasks} partnerTasks={partnerTasks} onAddTask={handleAddTask} onToggleTask={handleToggleTask} onDeleteTask={handleDeleteTask} isRevealed={phase !== SessionPhase.FOCUS} canEdit={phase === SessionPhase.ICEBREAKER} partnerName={partner.name} />
-        </div>
-
-        {icebreaker && (
-            <div className="absolute top-24 left-1/2 -translate-x-1/2 bg-black/80 backdrop-blur-xl border border-yellow-500/30 text-yellow-100 px-8 py-6 rounded-3xl shadow-2xl max-w-lg text-center pointer-events-auto animate-in slide-in-from-top-4 w-[90%] z-50">
-                <p className="text-lg font-medium leading-relaxed font-serif italic">"{icebreaker}"</p>
-                <button onClick={() => setIcebreaker(null)} className="absolute -top-3 -right-3 bg-slate-800 rounded-full p-2 border border-slate-600 hover:bg-slate-700 shadow-lg"><X size={16}/></button>
-            </div>
-        )}
-
-        {(isReportOpen || exitModalStep > 0) && (
-            <div 
-                className="absolute inset-0 z-[60] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in"
-                onMouseEnter={() => setIsInteracting(true)}
-                onMouseLeave={() => setIsInteracting(false)}
-            >
-                {/* Same Modals as before, just kept for logic consistency */}
-                {isReportOpen && (
-                    <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4 pointer-events-auto">
-                        <div className="flex justify-between items-center">
-                            <h3 className="text-white font-bold flex items-center gap-2"><Flag size={18} className="text-red-500"/> Report User</h3>
-                            <button onClick={() => setIsReportOpen(false)} className="text-slate-500 hover:text-white"><X size={20}/></button>
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-xs text-slate-400 uppercase font-bold">Reason</label>
-                            <select value={reportReason} onChange={(e) => setReportReason(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm text-white outline-none">
-                                <option>Inappropriate Behavior</option>
-                                <option>Abusive Language</option>
-                                <option>Spam / Commercial</option>
-                                <option>Camera Off / Not Working</option>
-                                <option>Other</option>
-                            </select>
-                        </div>
-                        <textarea value={reportDetails} onChange={(e) => setReportDetails(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm text-white min-h-[80px]" />
-                        <div className="flex gap-2 pt-2">
-                            <Button variant="secondary" onClick={() => setIsReportOpen(false)} className="flex-1">Cancel</Button>
-                            <Button variant="danger" onClick={handleReportSubmit} className="flex-1">Submit</Button>
-                        </div>
-                    </div>
-                )}
-                {exitModalStep > 0 && (
-                    <div className="max-w-md w-full bg-slate-900 border border-white/10 rounded-2xl p-6 shadow-2xl text-center pointer-events-auto">
-                        {exitModalStep === 1 ? (
-                            <div className="space-y-4">
-                                <HeartCrack size={40} className="text-blue-400 mx-auto" />
-                                <h3 className="text-xl font-bold text-white">Wait, don't break the flow!</h3>
-                                <p className="text-slate-400">Leaving now disrupts the session rhythm for <b>{partner.name}</b>.</p>
-                                <div className="grid grid-cols-2 gap-3 mt-4">
-                                    <Button onClick={() => setExitModalStep(0)} variant="secondary">I'll Stay</Button>
-                                    <Button onClick={() => setExitModalStep(2)} className="bg-transparent border border-red-900/50 text-red-400">I Must Leave</Button>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="space-y-4">
-                                <AlertTriangle size={40} className="text-red-500 mx-auto" />
-                                <h3 className="text-xl font-bold text-white">Reliability Strike</h3>
-                                <p className="text-slate-500 text-sm">Leaving early counts as a Strike. 3 Strikes = Timeout.</p>
-                                <div className="grid grid-cols-2 gap-3 mt-4">
-                                    <Button onClick={() => setExitModalStep(0)} variant="secondary">Go Back</Button>
-                                    <Button onClick={confirmExitWithStrike} variant="danger">Confirm Exit</Button>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                )}
-            </div>
-        )}
-
+      {/* --- OVERLAY WINDOWS (Keep Logic) --- */}
+      <div 
+          className="pointer-events-auto"
+          onMouseEnter={() => setIsInteracting(true)}
+          onMouseLeave={() => setIsInteracting(false)}
+      >
+           <ChatWindow messages={chatMessages} onSendMessage={sendMessage} partnerName={partner.name} isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
+           <TaskBoard isOpen={isTaskBoardOpen} onClose={() => setIsTaskBoardOpen(false)} myTasks={myTasks} partnerTasks={partnerTasks} onAddTask={handleAddTask} onToggleTask={handleToggleTask} onDeleteTask={handleDeleteTask} isRevealed={phase !== SessionPhase.FOCUS} canEdit={phase === SessionPhase.ICEBREAKER} partnerName={partner.name} />
       </div>
+
+      {/* ICEBREAKER POPUP */}
+      {icebreaker && (
+          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 bg-black/80 backdrop-blur-xl border border-white/10 text-white px-8 py-6 rounded-2xl shadow-2xl max-w-lg text-center pointer-events-auto animate-in fade-in zoom-in-95 z-50">
+              <p className="text-xl font-light font-serif italic">"{icebreaker}"</p>
+              <button onClick={() => setIcebreaker(null)} className="mt-6 text-xs text-slate-500 hover:text-white uppercase tracking-widest">Dismiss</button>
+          </div>
+      )}
+
+      {/* REPORT & EXIT MODALS (Kept Functional but Styled) */}
+      {(isReportOpen || exitModalStep > 0) && (
+          <div className="absolute inset-0 z-[60] bg-black/90 flex items-center justify-center p-4">
+              {isReportOpen && (
+                  <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-lg w-full max-w-sm space-y-4">
+                      <h3 className="text-white font-bold">Report User</h3>
+                      <select value={reportReason} onChange={(e) => setReportReason(e.target.value)} className="w-full bg-black border border-zinc-700 rounded p-2 text-white outline-none">
+                          <option>Inappropriate Behavior</option>
+                          <option>Abusive Language</option>
+                      </select>
+                      <textarea value={reportDetails} onChange={(e) => setReportDetails(e.target.value)} className="w-full bg-black border border-zinc-700 rounded p-2 text-white h-24" placeholder="Details..." />
+                      <div className="flex gap-2">
+                          <Button variant="secondary" onClick={() => setIsReportOpen(false)} className="flex-1">Cancel</Button>
+                          <Button variant="danger" onClick={handleReportSubmit} className="flex-1">Submit</Button>
+                      </div>
+                  </div>
+              )}
+              {exitModalStep > 0 && (
+                  <div className="max-w-md w-full bg-zinc-900 border border-zinc-800 p-8 rounded-lg text-center">
+                      <h3 className="text-2xl font-bold text-white mb-2">Leave Session?</h3>
+                      <p className="text-zinc-400 mb-6">{exitModalStep === 1 ? "Leaving now breaks the flow for your partner." : "Leaving early results in a reliability strike."}</p>
+                      <div className="flex gap-4 justify-center">
+                          <button onClick={() => setExitModalStep(0)} className="px-6 py-2 rounded bg-white text-black font-medium hover:bg-zinc-200">Stay</button>
+                          <button onClick={exitModalStep === 1 ? () => setExitModalStep(2) : confirmExitWithStrike} className="px-6 py-2 rounded text-red-500 hover:bg-red-500/10">Leave</button>
+                      </div>
+                  </div>
+              )}
+          </div>
+      )}
+
     </div>
   );
 };

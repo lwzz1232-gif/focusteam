@@ -226,7 +226,7 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
                 <div className="grid grid-cols-2 gap-2 p-2">
                    {/* User Video */}
                    <div className="aspect-video bg-slate-800 rounded-lg relative overflow-hidden group">
-                      <img src="https://images.unsplash.com/photo-1598550874175-4d7112ee661c?q=80&w=800&auto=format&fit=crop" className="w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity" alt="You" />
+                      <img src="https://www.pexels.com/photo/photo-of-woman-taking-notes-4458554/" className="w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity" alt="You" />
                       <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur px-2 py-1 rounded text-[10px] font-mono text-white">YOU</div>
                    </div>
                    {/* Partner Video */}

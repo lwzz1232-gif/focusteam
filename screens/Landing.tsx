@@ -160,7 +160,7 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
         <Reveal center width="100%">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-medium mb-8 animate-pulse">
             <span className="w-2 h-2 rounded-full bg-blue-400 shadow-[0_0_10px_currentColor]"></span>
-            142 people focusing right now
+            Join other people
           </div>
         </Reveal>
 
@@ -177,8 +177,7 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
 
           <Reveal delay={200} center width="100%">
             <p className="text-lg md:text-xl text-slate-400 max-w-2xl mx-auto leading-relaxed text-center">
-              Experience the quietest productivity community on earth. 
-              We match you with a partner for 50 minutes of deep work. 
+              We match you with a partner who selected the same duration. 
               <span className="text-slate-200"> Cameras on. Mics off. Zero distractions.</span>
             </p>
           </Reveal>
@@ -256,9 +255,9 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
       {/* --- STATS BAR --- */}
       <div className="border-y border-white/5 bg-white/[0.02] backdrop-blur-sm">
         <div className="max-w-6xl mx-auto py-8 grid grid-cols-2 md:grid-cols-4 gap-4 px-6">
-           <StatBadge icon={Users} label="Community" value="25k+ Members" />
-           <StatBadge icon={Clock} label="Focus Time" value="1.2M Hours" />
-           <StatBadge icon={Zap} label="Average Session" value="50 Minutes" />
+           <StatBadge icon={Users} label="Community" value="Join us" />
+           <StatBadge icon={Clock} label="Focus Time" value="+80 Hours" />
+           <StatBadge icon={Zap} label="Average Session" value="1H" />
            <StatBadge icon={Star} label="Rating" value="4.9/5.0" />
         </div>
       </div>
@@ -284,7 +283,7 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
                {
                  step: "01",
                  title: "Set Your Intent",
-                 desc: "Log in and define what you need to accomplish in the next 50 minutes. Writing it down makes it real.",
+                 desc: "Log in and define what you need to accomplish in the next +30 minutes. Writing it down makes it real.",
                  icon: MousePointer2
                },
                {

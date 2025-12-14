@@ -92,26 +92,27 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  useEffect(() => {
-    if (!loading) {
-      // Auto-redirect logic
-      if (user) {
-        if (currentScreen === Screen.LOGIN) {
-          setCurrentScreen(Screen.DASHBOARD);
-        }
-      } else {
-        if (currentScreen !== Screen.SPLASH && currentScreen !== Screen.LOGIN) {
-          setCurrentScreen(Screen.LOGIN);
-        }
+ useEffect(() => {
+  if (!loading) {
+    if (user) {
+      if (currentScreen === Screen.LOGIN || currentScreen === Screen.LANDING) {
+        setCurrentScreen(Screen.DASHBOARD);
+      }
+    } else {
+      if (currentScreen !== Screen.SPLASH && currentScreen !== Screen.LOGIN && currentScreen !== Screen.LANDING) {
+        setCurrentScreen(Screen.LANDING); // Changed from LOGIN
       }
     }
-  }, [user, loading]);
+  }
+}, [user, loading, currentScreen]);
 
-  const handleSplashComplete = () => {
-  if (user) setCurrentScreen(Screen.DASHBOARD);
-  else setCurrentScreen(Screen.LANDING); // Changed from LOGIN
+const handleSplashComplete = () => {
+  if (user) {
+    setCurrentScreen(Screen.DASHBOARD);
+  } else {
+    setCurrentScreen(Screen.LANDING);
+  }
 };
-
   // --- UPDATED: Async to handle Test Session Creation ---
   const handleStartMatch = async (config: SessionConfig) => {
     setSessionConfig(config);
@@ -190,21 +191,24 @@ export const App: React.FC = () => {
       onLogout={handleLogout} 
       onAdminClick={() => setCurrentScreen(Screen.ADMIN)}
     >
-      {currentScreen === Screen.SPLASH && <Splash onComplete={handleSplashComplete} />}
+  {currentScreen === Screen.SPLASH && <Splash onComplete={handleSplashComplete} />}
 
-      {currentScreen === Screen.LANDING && (
-  <Landing onGetStarted={() => setCurrentScreen(Screen.LOGIN)} />
+{currentScreen === Screen.LANDING && (
+  <Landing 
+    onGetStarted={() => setCurrentScreen(Screen.LOGIN)}
+    onSignIn={() => setCurrentScreen(Screen.LOGIN)}
+  />
 )}
-      {currentScreen === Screen.LOGIN && <Login onLogin={() => {}} />}
 
-      {currentScreen === Screen.DASHBOARD && user && (
-        <Dashboard 
-          user={user} 
-          onStartMatch={handleStartMatch}
-          onLogout={handleLogout} 
-        />
-      )}
+{currentScreen === Screen.LOGIN && <Login onLogin={() => {}} />}
 
+{currentScreen === Screen.DASHBOARD && user && (
+  <Dashboard 
+    user={user} 
+    onStartMatch={handleStartMatch}
+    onLogout={handleLogout} 
+  />
+)}
       {currentScreen === Screen.MATCHING && user && (
         <Matching 
           user={user}

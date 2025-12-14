@@ -11,7 +11,78 @@ import { useChat } from '../hooks/useChat';
 import { useWebRTC } from '../hooks/useWebRTC'; 
 import { db } from '../utils/firebaseConfig';
 import { collection, query, where, updateDoc, doc, addDoc, onSnapshot, deleteDoc, serverTimestamp, increment } from 'firebase/firestore';
+// --- NEW: REALISTIC FIRE ENGINE ---
+const FireCanvas = ({ active }: { active: boolean }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  useEffect(() => {
+    if (!active || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const particles: any[] = [];
+    const particleCount = 100; // Adjust for density
+
+    for (let i = 0; i < particleCount; i++) {
+      particles.push({
+        x: Math.random() * canvas.width,
+        y: canvas.height + Math.random() * 100,
+        vx: (Math.random() - 0.5) * 3,
+        vy: Math.random() * -8 - 3, // Upward speed
+        life: Math.random() * 100,
+        size: Math.random() * 15 + 5,
+        color: `hsl(${Math.random() * 40 + 10}, 100%, 50%)`
+      });
+    }
+
+    let animationId: number;
+
+    const animate = () => {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.1)'; // Trail effect
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      ctx.globalCompositeOperation = 'lighter'; // Glowing blending
+
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= 1.5;
+        p.size *= 0.96;
+
+        if (p.life <= 0) {
+            // Respawn
+            p.x = Math.random() * canvas.width;
+            p.y = canvas.height + 50;
+            p.life = 100;
+            p.size = Math.random() * 15 + 5;
+            p.vy = Math.random() * -8 - 3;
+        }
+
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        // Dynamic Gradient: Yellow center, Red edges
+        const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size);
+        gradient.addColorStop(0, `hsla(50, 100%, 80%, ${p.life/100})`);
+        gradient.addColorStop(1, `hsla(10, 100%, 50%, 0)`);
+        ctx.fillStyle = gradient;
+        ctx.fill();
+      }
+      animationId = requestAnimationFrame(animate);
+    };
+    animate();
+
+    return () => cancelAnimationFrame(animationId);
+  }, [active]);
+
+  if (!active) return null;
+  return <canvas ref={canvasRef} className="absolute inset-0 z-50 pointer-events-none fade-in duration-300" />;
+};
 interface LiveSessionProps {
   user: User;
   partner: Partner;
@@ -81,7 +152,8 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const auraTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastMsgCount = useRef(0); 
-
+const [isFireActive, setIsFireActive] = useState(false);
+  const fireTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   // ---------------------------------------------------------------------------
   // ADDED: POMODORO LOGIC START
   // ---------------------------------------------------------------------------
@@ -334,12 +406,19 @@ else if (data.phase === SessionPhase.FOCUS) totalDurationForPhase = isTest ? 30 
   };
 
   const triggerAura = (emoji: string) => {
+      // NEW LOGIC: Check for Fire
+      if (emoji === '🔥') {
+          setIsFireActive(true);
+          if (fireTimeoutRef.current) clearTimeout(fireTimeoutRef.current);
+          fireTimeoutRef.current = setTimeout(() => setIsFireActive(false), 3500); // Burns for 3.5 seconds
+      }
+
+      // Existing logic for other emojis
       let type: 'fire' | 'power' | 'wave' = 'wave';
       if (emoji === '🔥') type = 'fire';
       if (emoji === '💯') type = 'power';
       
       setAura(type);
-      
       if (auraTimeoutRef.current) clearTimeout(auraTimeoutRef.current);
       auraTimeoutRef.current = setTimeout(() => setAura(null), 2500);
   };
@@ -508,7 +587,7 @@ else if (data.phase === SessionPhase.FOCUS) totalDurationForPhase = isTest ? 30 
 
   return (
     <div className="absolute inset-0 bg-black overflow-hidden select-none font-sans">
-      
+      <FireCanvas active={isFireActive} />
       <style>{`
         @keyframes ripple-effect {
           0% { transform: scale(0); opacity: 0.8; }

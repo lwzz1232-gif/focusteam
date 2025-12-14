@@ -231,7 +231,7 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
                    </div>
                    {/* Partner Video */}
                    <div className="aspect-video bg-slate-800 rounded-lg relative overflow-hidden group border border-blue-500/30">
-                      <img src="https://images.unsplash.com/photo-1531538606174-0f90ff5dce83?q=80&w=800&auto=format&fit=crop" className="w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity" alt="Partner" />
+                      <img src="https://www.pexels.com/photo/man-wearing-black-crew-neck-t-shirt-using-black-headphones-reading-book-while-sitting-3466163/" className="w-full h-full object-cover opacity-60 group-hover:opacity-80 transition-opacity" alt="Partner" />
                       <div className="absolute inset-0 flex items-center justify-center">
                          <div className="w-12 h-12 rounded-full bg-blue-600/20 flex items-center justify-center backdrop-blur-sm border border-blue-500/50">
                            <Activity size={20} className="text-blue-400" />

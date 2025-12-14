@@ -4,15 +4,16 @@ import { User } from '../types';
 import { auth, db, googleProvider } from '../utils/firebaseConfig';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, signInWithPopup, sendEmailVerification } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
-import { Lock, Mail, User as UserIcon, AlertCircle, CheckCircle2, Chrome, FileText, X, ShieldCheck } from 'lucide-react';
+import { Lock, Mail, User as UserIcon, AlertCircle, CheckCircle2, Chrome, FileText, X, ShieldCheck, ArrowLeft } from 'lucide-react';
 import { AuthMascot } from '../components/AuthMascot';
 import { Logo } from '../components/Logo';
 
 interface LoginProps {
   onLogin: (user: User) => void;
+  onBack: () => void; 
 }
 
-export const Login: React.FC<LoginProps> = ({ onLogin }) => {
+export const Login: React.FC<LoginProps> = ({ onLogin, onBack }) => {
   const [isSignup, setIsSignup] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -282,6 +283,16 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
       {showTermsModal && <TermsModal />}
 
       <div className="max-w-md w-full bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl relative overflow-hidden transition-all duration-300">
+        {/* --- BACK BUTTON START --- */}
+        <button 
+            onClick={onBack} 
+            type="button"
+            className="absolute top-4 left-4 text-slate-500 hover:text-white transition-colors z-20"
+            title="Back to Home"
+        >
+            <ArrowLeft size={24} />
+        </button>
+        {/* --- BACK BUTTON END --- */}
         <div className="relative z-10 mb-2">
             <AuthMascot isHidden={isPasswordFocus} />
         </div>

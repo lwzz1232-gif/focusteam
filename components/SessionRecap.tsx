@@ -97,16 +97,79 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
     drawRoundedRect(ctx, -250, -80, 500, 160, 20); ctx.stroke(); ctx.fillStyle = '#ef4444'; ctx.font = 'bold 80px "Courier New", monospace'; ctx.fillText('CONFIDENTIAL', 0, 25); ctx.restore();
   };
 
-  const drawNeonTheme = (ctx: CanvasRenderingContext2D) => {
-    const grad = ctx.createLinearGradient(0, 0, 1080, 1920); grad.addColorStop(0, '#0f172a'); grad.addColorStop(0.5, '#312e81'); grad.addColorStop(1, '#4c1d95'); ctx.fillStyle = grad; ctx.fillRect(0, 0, 1080, 1920);
-    const glow1 = ctx.createRadialGradient(200, 300, 0, 200, 300, 500); glow1.addColorStop(0, 'rgba(236, 72, 153, 0.4)'); glow1.addColorStop(1, 'transparent'); ctx.fillStyle = glow1; ctx.fillRect(0,0,1080,1920);
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.05)'; ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)'; ctx.lineWidth = 3; drawRoundedRect(ctx, 100, 400, 880, 1100, 60); ctx.fill(); ctx.stroke();
-    ctx.textAlign = 'center'; ctx.font = 'bold 60px Inter, sans-serif'; ctx.fillStyle = '#c084fc'; ctx.fillText('SESSION COMPLETE', 540, 550);
-    ctx.font = '900 300px Inter, sans-serif'; ctx.fillStyle = '#fff'; ctx.shadowColor = '#d946ef'; ctx.shadowBlur = 40; ctx.fillText(`${Math.round(duration)}`, 540, 900); ctx.shadowBlur = 0;
-    ctx.font = 'bold 60px Inter, sans-serif'; ctx.fillText('MINUTES', 540, 1000);
-    ctx.font = '50px Inter, sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.fillText(`${user.name}  ×  ${partner.name}`, 540, 1200);
-    ctx.fillStyle = '#22c55e'; drawRoundedRect(ctx, 340, 1300, 400, 100, 50); ctx.fill();
-    ctx.fillStyle = '#000'; ctx.font = 'bold 40px Inter, sans-serif'; ctx.fillText(`${completedCount} TASKS CRUSHED`, 540, 1365);
+ const drawNeonTheme = (ctx: CanvasRenderingContext2D) => {
+    // 1. Background (Deep Premium Dark)
+    ctx.fillStyle = '#020617'; // Slate-950
+    ctx.fillRect(0, 0, 1080, 1920);
+
+    // 2. Atmospheric Glows (Subtle, not harsh)
+    const topGlow = ctx.createRadialGradient(1080, 0, 0, 1080, 0, 900);
+    topGlow.addColorStop(0, 'rgba(99, 102, 241, 0.4)'); // Indigo
+    topGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = topGlow; ctx.fillRect(0,0,1080,1920);
+
+    const botGlow = ctx.createRadialGradient(0, 1920, 0, 0, 1920, 900);
+    botGlow.addColorStop(0, 'rgba(236, 72, 153, 0.4)'); // Pink
+    botGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = botGlow; ctx.fillRect(0,0,1080,1920);
+
+    // 3. The Glass Card Container
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
+    ctx.shadowBlur = 60;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.lineWidth = 3;
+    drawRoundedRect(ctx, 140, 460, 800, 1000, 60); // Centered Card
+    ctx.fill(); 
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // 4. Content - The Big Number
+    ctx.textAlign = 'center'; 
+    ctx.font = 'bold 320px Inter, sans-serif'; 
+    
+    // Gradient Text for the number
+    const numGrad = ctx.createLinearGradient(140, 700, 940, 900);
+    numGrad.addColorStop(0, '#ffffff');
+    numGrad.addColorStop(1, '#e2e8f0');
+    ctx.fillStyle = numGrad;
+    
+    ctx.fillText(`${Math.round(duration)}`, 540, 950);
+    
+    // 5. Content - Labels
+    ctx.fillStyle = '#94a3b8'; // Slate 400
+    ctx.font = '500 50px Inter, sans-serif';
+    ctx.letterSpacing = '10px';
+    ctx.fillText('MINUTES FOCUSED', 540, 1050);
+
+    // 6. Divider Line
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(340, 1150);
+    ctx.lineTo(740, 1150);
+    ctx.stroke();
+
+    // 7. Partner & Tasks
+    ctx.font = '40px Inter, sans-serif';
+    ctx.fillStyle = '#cbd5e1'; // Slate 300
+    ctx.fillText(`with ${partner.name}`, 540, 1230);
+    
+    if (completedCount > 0) {
+        ctx.fillStyle = '#4ade80'; // Green
+        ctx.font = 'bold 40px Inter, sans-serif';
+        ctx.fillText(`✓ ${completedCount} Tasks Completed`, 540, 1320);
+    }
+
+    // 8. BRANDING (The most important part for sharing)
+    // We put it at the bottom, big and bold
+    ctx.font = 'bold 80px Inter, sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('FocusTwin.', 540, 1700);
+    
+    ctx.font = '30px Inter, sans-serif';
+    ctx.fillStyle = '#64748b';
+    ctx.fillText(new Date().toLocaleDateString(), 540, 1760);
   };
 
   const drawZenTheme = (ctx: CanvasRenderingContext2D) => {

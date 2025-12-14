@@ -87,10 +87,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   
   // 1. Calculate total expected focus duration to determine cycles
   const calculatedFocusDuration = isTest ? 30 : (config.duration - config.preTalkMinutes - config.postTalkMinutes) * 60;
-  
+   const modeStr = String(config.mode).toUpperCase();
   // 2. Check if mode is Pomodoro (handling potentially untyped config from props)
   const isPomodoroMode = (config as any).mode === 'POMODORO' || (config as any).mode === 1;
 
+  
   // 3. Helper to determine current Pomodoro state based on timeLeft
   const getPomodoroState = () => {
       // Only apply during FOCUS phase and if enabled

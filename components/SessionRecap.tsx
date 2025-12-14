@@ -17,6 +17,7 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
   const [currentTheme, setCurrentTheme] = useState<Theme>('NEON');
   const [isSharing, setIsSharing] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string>('');
+  const [neonVariant, setNeonVariant] = useState(0); // 0, 1, or 2
   const completedCount = tasks.filter(t => t.completed).length;
 
   // --- CANVAS LOGIC (UNTOUCHED) ---
@@ -97,79 +98,112 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
     drawRoundedRect(ctx, -250, -80, 500, 160, 20); ctx.stroke(); ctx.fillStyle = '#ef4444'; ctx.font = 'bold 80px "Courier New", monospace'; ctx.fillText('CONFIDENTIAL', 0, 25); ctx.restore();
   };
 
- const drawNeonTheme = (ctx: CanvasRenderingContext2D) => {
-    // 1. Background (Deep Premium Dark)
-    ctx.fillStyle = '#020617'; // Slate-950
-    ctx.fillRect(0, 0, 1080, 1920);
+// --- THE NEW NEON SUITE (3 VARIATIONS) ---
+  const drawNeonTheme = (ctx: CanvasRenderingContext2D) => {
+    if (neonVariant === 0) drawNeonCard(ctx);
+    else if (neonVariant === 1) drawNeonRing(ctx);
+    else drawNeonTypo(ctx);
+  };
 
-    // 2. Atmospheric Glows (Subtle, not harsh)
+  // VARIATION 1: The "Premium Card" (Clean, Professional)
+  const drawNeonCard = (ctx: CanvasRenderingContext2D) => {
+    ctx.fillStyle = '#020617'; ctx.fillRect(0, 0, 1080, 1920);
+    
+    // Ambient Glows
     const topGlow = ctx.createRadialGradient(1080, 0, 0, 1080, 0, 900);
-    topGlow.addColorStop(0, 'rgba(99, 102, 241, 0.4)'); // Indigo
-    topGlow.addColorStop(1, 'transparent');
+    topGlow.addColorStop(0, 'rgba(99, 102, 241, 0.4)'); topGlow.addColorStop(1, 'transparent');
     ctx.fillStyle = topGlow; ctx.fillRect(0,0,1080,1920);
 
     const botGlow = ctx.createRadialGradient(0, 1920, 0, 0, 1920, 900);
-    botGlow.addColorStop(0, 'rgba(236, 72, 153, 0.4)'); // Pink
-    botGlow.addColorStop(1, 'transparent');
+    botGlow.addColorStop(0, 'rgba(236, 72, 153, 0.4)'); botGlow.addColorStop(1, 'transparent');
     ctx.fillStyle = botGlow; ctx.fillRect(0,0,1080,1920);
 
-    // 3. The Glass Card Container
-    ctx.shadowColor = 'rgba(0,0,0,0.5)';
-    ctx.shadowBlur = 60;
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-    ctx.lineWidth = 3;
-    drawRoundedRect(ctx, 140, 460, 800, 1000, 60); // Centered Card
-    ctx.fill(); 
-    ctx.stroke();
-    ctx.shadowBlur = 0;
+    // Glass Card
+    ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 60;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.03)'; ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)'; ctx.lineWidth = 3;
+    drawRoundedRect(ctx, 140, 460, 800, 1000, 60); ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0;
 
-    // 4. Content - The Big Number
-    ctx.textAlign = 'center'; 
-    ctx.font = 'bold 320px Inter, sans-serif'; 
-    
-    // Gradient Text for the number
+    // Data
+    ctx.textAlign = 'center'; ctx.font = 'bold 320px Inter, sans-serif'; 
     const numGrad = ctx.createLinearGradient(140, 700, 940, 900);
-    numGrad.addColorStop(0, '#ffffff');
-    numGrad.addColorStop(1, '#e2e8f0');
-    ctx.fillStyle = numGrad;
+    numGrad.addColorStop(0, '#ffffff'); numGrad.addColorStop(1, '#94a3b8');
+    ctx.fillStyle = numGrad; ctx.fillText(`${Math.round(duration)}`, 540, 950);
     
-    ctx.fillText(`${Math.round(duration)}`, 540, 950);
-    
-    // 5. Content - Labels
-    ctx.fillStyle = '#94a3b8'; // Slate 400
-    ctx.font = '500 50px Inter, sans-serif';
-    ctx.letterSpacing = '10px';
+    ctx.fillStyle = '#94a3b8'; ctx.font = '500 50px Inter, sans-serif'; ctx.letterSpacing = '10px';
     ctx.fillText('MINUTES FOCUSED', 540, 1050);
 
-    // 6. Divider Line
-    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(340, 1150);
-    ctx.lineTo(740, 1150);
-    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(340, 1150); ctx.lineTo(740, 1150); ctx.stroke();
 
-    // 7. Partner & Tasks
-    ctx.font = '40px Inter, sans-serif';
-    ctx.fillStyle = '#cbd5e1'; // Slate 300
+    ctx.font = '40px Inter, sans-serif'; ctx.fillStyle = '#cbd5e1'; ctx.letterSpacing = '0px';
     ctx.fillText(`with ${partner.name}`, 540, 1230);
     
-    if (completedCount > 0) {
-        ctx.fillStyle = '#4ade80'; // Green
-        ctx.font = 'bold 40px Inter, sans-serif';
-        ctx.fillText(`✓ ${completedCount} Tasks Completed`, 540, 1320);
-    }
-
-    // 8. BRANDING (The most important part for sharing)
-    // We put it at the bottom, big and bold
-    ctx.font = 'bold 80px Inter, sans-serif';
-    ctx.fillStyle = '#ffffff';
+    // Branding
+    ctx.font = 'bold 80px Inter, sans-serif'; ctx.fillStyle = '#ffffff';
     ctx.fillText('FocusTwin.', 540, 1700);
+  };
+
+  // VARIATION 2: The "Fitness Ring" (Apple Style)
+  const drawNeonRing = (ctx: CanvasRenderingContext2D) => {
+    ctx.fillStyle = '#000000'; ctx.fillRect(0, 0, 1080, 1920);
     
-    ctx.font = '30px Inter, sans-serif';
-    ctx.fillStyle = '#64748b';
-    ctx.fillText(new Date().toLocaleDateString(), 540, 1760);
+    // Background Rings
+    ctx.lineWidth = 60; ctx.lineCap = 'round';
+    ctx.strokeStyle = '#1e1b4b'; 
+    ctx.beginPath(); ctx.arc(540, 800, 350, 0, Math.PI * 2); ctx.stroke();
+
+    // Progress Ring (Simulated 75% for aesthetic)
+    ctx.strokeStyle = '#4ade80'; 
+    ctx.shadowColor = '#4ade80'; ctx.shadowBlur = 40;
+    ctx.beginPath(); ctx.arc(540, 800, 350, -Math.PI / 2, Math.PI * 1); ctx.stroke(); ctx.shadowBlur = 0;
+
+    // Text Inside Ring
+    ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
+    ctx.font = 'bold 240px Inter, sans-serif'; ctx.fillText(`${Math.round(duration)}`, 540, 850);
+    ctx.font = '50px Inter, sans-serif'; ctx.fillStyle = '#4ade80'; ctx.fillText('MINUTES', 540, 940);
+
+    // Stats Grid
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#333'; ctx.fillRect(140, 1300, 380, 250); 
+    ctx.fillStyle = '#333'; ctx.fillRect(560, 1300, 380, 250);
+    
+    ctx.fillStyle = '#9ca3af'; ctx.font = '40px Inter, sans-serif';
+    ctx.fillText('PARTNER', 180, 1370); ctx.fillText('TASKS', 600, 1370);
+    
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 60px Inter, sans-serif';
+    ctx.fillText(partner.name.substring(0,8), 180, 1460); 
+    ctx.fillText(`${completedCount} Done`, 600, 1460);
+
+    // Branding
+    ctx.textAlign = 'center'; ctx.font = 'bold 60px Inter, sans-serif'; ctx.fillStyle = '#fff';
+    ctx.fillText('FocusTwin Activity', 540, 200);
+  };
+
+  // VARIATION 3: The "Typography" (Spotify Wrapped Style)
+  const drawNeonTypo = (ctx: CanvasRenderingContext2D) => {
+    ctx.fillStyle = '#4c0519'; ctx.fillRect(0, 0, 1080, 1920); // Deep Wine Red
+    
+    // Giant Background Text
+    ctx.font = 'bold 400px Inter, sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    ctx.textAlign = 'center';
+    ctx.fillText('FOCUS', 540, 400); ctx.fillText('MODE', 540, 700); ctx.fillText('ON', 540, 1000);
+
+    // Central Stat
+    ctx.fillStyle = '#f43f5e'; // Rose
+    ctx.beginPath(); ctx.arc(540, 960, 400, 0, Math.PI * 2); ctx.fill();
+
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 350px Inter, sans-serif';
+    ctx.fillText(`${Math.round(duration)}`, 540, 1050);
+    ctx.font = 'bold 60px Inter, sans-serif'; ctx.fillText('MINUTES LOCKED IN', 540, 1150);
+
+    // Partner Badge
+    ctx.fillStyle = '#fff'; ctx.fillRect(240, 1500, 600, 120);
+    ctx.fillStyle = '#000'; ctx.font = 'bold 50px Inter, sans-serif';
+    ctx.fillText(`Partner: ${partner.name}`, 540, 1580);
+
+    // Branding
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 50px Inter, sans-serif';
+    ctx.fillText('#FocusTwin', 540, 1800);
   };
 
   const drawZenTheme = (ctx: CanvasRenderingContext2D) => {
@@ -218,13 +252,21 @@ export const SessionRecap: React.FC<SessionRecapProps> = ({ user, partner, durat
   // --- NEW: GENERATE LIVE PREVIEW ---
   useEffect(() => {
     // Small delay to ensure fonts/canvas are ready
+  // --- RANDOMIZE NEON VARIANT ON MOUNT ---
+  useEffect(() => {
+    // Pick a number between 0 and 2
+    setNeonVariant(Math.floor(Math.random() * 3));
+  }, []);
+
+  // --- GENERATE PREVIEW ---
+  useEffect(() => {
     const timer = setTimeout(() => {
       generateCanvas().then(canvas => {
         if (canvas) setPreviewUrl(canvas.toDataURL());
       });
     }, 100);
     return () => clearTimeout(timer);
-  }, [currentTheme, user, partner, duration, completedCount]);
+  }, [currentTheme, neonVariant]); // Added neonVariant to dependencies
   const themeStyle = getThemeStyles();
 
   return (

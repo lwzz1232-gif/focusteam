@@ -1,9 +1,38 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { SessionConfig, Partner, User } from '../types';
-import { Loader2, AlertTriangle, ExternalLink, Radio } from 'lucide-react';
+import { Loader2, AlertTriangle, ExternalLink, Wifi, Globe, Users } from 'lucide-react';
 import { useMatchmaking } from '../hooks/useMatchmaking';
 import { db } from '../utils/firebaseConfig';
 import { doc, onSnapshot, collection, addDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+
+// --- SUB-COMPONENT: The "Heatmap" Dots ---
+// This creates random "user signals" appearing on the radar
+const ActiveNodes = () => {
+  const [nodes, setNodes] = useState<{id: number, top: string, left: string, delay: string}[]>([]);
+
+  useEffect(() => {
+    // Generate 12 random "users" on the map
+    const newNodes = Array.from({ length: 12 }).map((_, i) => ({
+      id: i,
+      top: `${Math.random() * 80 + 10}%`,
+      left: `${Math.random() * 80 + 10}%`,
+      delay: `${Math.random() * 2}s`
+    }));
+    setNodes(newNodes);
+  }, []);
+
+  return (
+    <div className="absolute inset-0 rounded-full overflow-hidden opacity-50 pointer-events-none">
+      {nodes.map(n => (
+        <div 
+          key={n.id}
+          className="absolute w-2 h-2 bg-blue-400 rounded-full animate-ping"
+          style={{ top: n.top, left: n.left, animationDuration: '3s', animationDelay: n.delay }}
+        />
+      ))}
+    </div>
+  );
+};
 
 interface MatchingProps {
   user: User;
@@ -22,39 +51,29 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
 
   // Use the matchmaking hook
   const { status, joinQueue, cancelSearch, error } = useMatchmaking(user, (partner, sessionId) => {
-    console.log('[MATCHING] Received onMatch callback from hook:', partner, sessionId);
     setSessionIdToWatch(sessionId);
   });
 
   // Start the queue join on mount
   useEffect(() => {
-    console.log('[MATCHING] Component mounted, starting search');
     joinQueue(config);
-    
     return () => {
-      console.log('[MATCHING] Component unmounting, canceling search');
       cancelSearch();
-      // Cleanup lobby ticket if it exists
       if (lobbyTicketRef.current) {
         deleteDoc(doc(db, 'waiting_room', lobbyTicketRef.current)).catch(console.error);
       }
     };
   }, [config, joinQueue, cancelSearch]);
 
-  // --- LOBBY BROADCAST LOGIC (FIXED: Race Condition Guard) ---
+  // --- LOBBY BROADCAST LOGIC ---
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
-    let isActive = true; // Guard to track if this effect is still valid
+    let isActive = true;
 
-    // Only start timer if we are actively searching and NOT in lobby yet
     if (status === 'SEARCHING' && !sessionIdToWatch && !isInLobby) {
         timeoutId = setTimeout(async () => {
-            // Guard 1: Are we still waiting?
             if (!isActive || sessionIdToWatch || lobbyTicketRef.current) return;
-
             try {
-                console.log("[MATCHING] 10s passed. Broadcasting to Live Lobby...");
-                
                 const lobbyRef = await addDoc(collection(db, 'waiting_room'), {
                     userId: user.id,
                     userName: user.name,
@@ -62,9 +81,7 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
                     createdAt: serverTimestamp()
                 });
                 
-                // Guard 2: Did user cancel while we were awaiting network?
                 if (!isActive) {
-                     console.log("[MATCHING] Cancelled during broadcast. Deleting ghost doc.");
                      deleteDoc(lobbyRef).catch(console.error);
                 } else {
                     lobbyTicketRef.current = lobbyRef.id;
@@ -75,7 +92,6 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
             }
         }, 10000); // 10 Seconds
     } 
-    // If we match, remove from lobby
     else if (lobbyTicketRef.current && (sessionIdToWatch || status === 'MATCHED')) {
         deleteDoc(doc(db, 'waiting_room', lobbyTicketRef.current)).catch(console.error);
         lobbyTicketRef.current = null;
@@ -83,34 +99,19 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
 
     return () => {
         clearTimeout(timeoutId);
-        isActive = false; // Kill switch for async operations
+        isActive = false; 
     };
   }, [status, sessionIdToWatch, user, config, isInLobby]);
 
   // Listen to session document
   useEffect(() => {
     if (!sessionIdToWatch || hasCalledOnMatch) return;
-
     const sessionRef = doc(collection(db, 'sessions'), sessionIdToWatch);
-
     const unsubscribe = onSnapshot(sessionRef, (snap) => {
       if (!snap.exists()) return;
       const sessionData = snap.data() as any;
 
-      if (sessionData.started === true && !hasCalledOnMatch) {
-        setHasCalledOnMatch(true);
-        const partnerInfo = sessionData.participantInfo?.find((p: any) => p.userId !== user.id);
-        if (partnerInfo) {
-          onMatched({
-            id: partnerInfo.userId,
-            name: partnerInfo.displayName || 'Partner',
-            type: sessionData.config?.type || 'ANY',
-          }, sessionIdToWatch);
-        }
-        return;
-      }
-
-      if (Array.isArray(sessionData.participants) && sessionData.participants.length >= 2) {
+      const triggerMatch = () => {
         if (!hasCalledOnMatch) {
           setHasCalledOnMatch(true);
           const partnerInfo = sessionData.participantInfo?.find((p: any) => p.userId !== user.id);
@@ -122,35 +123,35 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
             }, sessionIdToWatch);
           }
         }
-      }
-    });
+      };
 
+      if (sessionData.started === true) triggerMatch();
+      if (Array.isArray(sessionData.participants) && sessionData.participants.length >= 2) triggerMatch();
+    });
     return () => unsubscribe();
   }, [sessionIdToWatch, user.id, onMatched, hasCalledOnMatch]);
 
   // Update status text
   useEffect(() => {
-    // STOP rotating text if we are in the lobby
     if (isInLobby) {
-        setStatusText("Visible in Public Lobby. Waiting for someone to join you...");
+        setStatusText("Visible in Global Lobby. Establishing uplink...");
         return;
     }
-
     if (status === 'SEARCHING') {
       const msgs = [
-        `Looking for ${config.type} sessions...`,
-        `Finding ${config.duration}m duration partner...`,
-        "Waiting for a match...",
+        `Scanning for ${config.type}...`,
+        `Ping: ${Math.floor(Math.random() * 40 + 10)}ms [Region: Global]`,
+        "Handshaking with peer network...",
       ];
       let i = 0;
       setStatusText(msgs[i]);
       const interval = setInterval(() => {
         i = (i + 1) % msgs.length;
         setStatusText(msgs[i]);
-      }, 2000);
+      }, 2500);
       return () => clearInterval(interval);
     } else if (status === 'MATCHED') {
-      setStatusText("Match Found! Connecting...");
+      setStatusText("Signal Locked. Initializing Session.");
     }
   }, [status, config, isInLobby]);
 
@@ -159,65 +160,96 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
     : null;
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-8 bg-slate-950 relative overflow-hidden">
+    <div className="flex-1 flex flex-col items-center justify-center p-8 bg-black relative overflow-hidden h-full">
       
-      {/* Background Pulse Effect */}
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className={`w-96 h-96 rounded-full animate-ping opacity-20 ${isInLobby ? 'bg-emerald-500/10' : 'bg-blue-500/10'}`}></div>
-      </div>
+      {/* CSS For Radar Sweep */}
+      <style>{`
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        .radar-sweep {
+          background: conic-gradient(from 0deg, transparent 0deg, rgba(59, 130, 246, 0.4) 360deg);
+          animation: spin 3s linear infinite;
+        }
+        .radar-sweep-green {
+          background: conic-gradient(from 0deg, transparent 0deg, rgba(16, 185, 129, 0.4) 360deg);
+          animation: spin 3s linear infinite;
+        }
+      `}</style>
 
+      {/* ERROR STATE */}
       {error ?  (
-        <div className="max-w-md w-full bg-red-500/10 border border-red-500/50 rounded-xl p-6 text-center animate-in fade-in zoom-in">
-          <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+        <div className="relative z-20 max-w-md w-full bg-red-950/40 border border-red-500/50 rounded-xl p-6 text-center animate-in fade-in zoom-in backdrop-blur-md">
+          <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4 shadow-[0_0_20px_rgba(239,68,68,0.4)]">
             <AlertTriangle size={32} className="text-red-500" />
           </div>
-          <h3 className="text-xl font-bold text-white mb-2">Connection Error</h3>
-          <p className="text-slate-300 mb-4 text-sm">{error}</p>
+          <h3 className="text-xl font-bold text-white mb-2">Connection Severed</h3>
+          <p className="text-red-200 mb-4 text-sm font-mono">{error}</p>
           {indexLink && (
             <a href={indexLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors mb-4">
-              <ExternalLink size={16} /> Create Missing Index
+              <ExternalLink size={16} /> Fix Database Index
             </a>
           )}
-          <button onClick={() => { cancelSearch(); onCancel(); }} className="text-slate-400 hover:text-white underline">Go Back</button>
+          <button onClick={() => { cancelSearch(); onCancel(); }} className="text-slate-400 hover:text-white underline text-xs uppercase tracking-wider">Return to Base</button>
         </div>
       ) : (
-        <div className="relative z-10 flex flex-col items-center text-center">
-          <div className="relative mb-12">
-            <div className={`absolute inset-0 blur-3xl rounded-full animate-pulse ${isInLobby ? 'bg-emerald-500/20' : 'bg-blue-500/20'}`}></div>
-            <div className={`relative w-32 h-32 rounded-full border-4 flex items-center justify-center ${isInLobby ? 'border-emerald-500/30' : 'border-blue-500/30'}`}>
-              {isInLobby ? (
-                  <Radio size={64} className="text-emerald-500 animate-pulse" />
-              ) : (
-                  <Loader2 size={64} className="text-blue-500 animate-spin" />
-              )}
+        // SCANNING STATE
+        <div className="relative z-10 flex flex-col items-center w-full max-w-lg">
+          
+          {/* RADAR VISUAL CONTAINER */}
+          <div className="relative w-80 h-80 mb-12 flex items-center justify-center">
+            
+            {/* Outer Rings */}
+            <div className={`absolute inset-0 rounded-full border border-dashed animate-[spin_60s_linear_infinite] opacity-20 ${isInLobby ? 'border-emerald-500' : 'border-blue-500'}`}></div>
+            <div className={`absolute inset-4 rounded-full border border-dashed animate-[spin_40s_linear_infinite_reverse] opacity-20 ${isInLobby ? 'border-emerald-500' : 'border-blue-500'}`}></div>
+            <div className={`absolute inset-12 rounded-full border opacity-10 ${isInLobby ? 'border-emerald-500' : 'border-blue-500'}`}></div>
+
+            {/* The Radar Sweep Gradient */}
+            <div className={`absolute inset-0 rounded-full ${isInLobby ? 'radar-sweep-green' : 'radar-sweep'} opacity-20`}></div>
+
+            {/* Center Icon */}
+            <div className={`relative z-10 w-24 h-24 rounded-full bg-black flex items-center justify-center border-2 shadow-[0_0_30px_inset] ${isInLobby ? 'border-emerald-500 shadow-emerald-900/50' : 'border-blue-500 shadow-blue-900/50'}`}>
+               {isInLobby ? (
+                   <Wifi size={40} className="text-emerald-500 animate-pulse" />
+               ) : (
+                   <Globe size={40} className="text-blue-500 animate-pulse" />
+               )}
             </div>
+
+            {/* Random User "Dots" (The Heatmap) */}
+            <ActiveNodes />
+
           </div>
 
-          <h2 className="text-2xl font-bold text-white mb-4">
-              {isInLobby ? "Live in Lobby" : "Finding Your Partner"}
-          </h2>
-          
-          {isInLobby && (
-              <div className="mb-6 bg-emerald-500/10 border border-emerald-500/20 px-4 py-2 rounded-full flex items-center gap-2">
-                  <span className="relative flex h-3 w-3">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-                  </span>
-                  <span className="text-emerald-400 text-sm font-medium">Visible to everyone</span>
-              </div>
-          )}
+          {/* STATUS TEXT & CONTROLS */}
+          <div className="space-y-6 text-center w-full">
+             <div className="space-y-2">
+                <h2 className="text-3xl font-bold text-white tracking-tight">
+                    {isInLobby ? "PUBLIC LOBBY" : "SEARCHING..."}
+                </h2>
+                <div className={`inline-flex items-center gap-2 px-3 py-1 rounded text-xs font-bold uppercase tracking-widest border ${isInLobby ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-blue-500/10 border-blue-500/30 text-blue-400'}`}>
+                    {isInLobby ? <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"/> : <Loader2 size={10} className="animate-spin"/>}
+                    {statusText}
+                </div>
+             </div>
 
-          <p className="text-slate-300 mb-8 text-center max-w-sm">{statusText}</p>
+             {/* Stats Row */}
+             <div className="grid grid-cols-2 gap-4 max-w-xs mx-auto text-xs text-slate-500 border-t border-slate-800 pt-6">
+                <div>
+                    <div className="flex items-center justify-center gap-1 mb-1"><Users size={12}/> ONLINE</div>
+                    <span className="text-slate-300 font-bold text-lg">1,240</span>
+                </div>
+                <div>
+                    <div className="flex items-center justify-center gap-1 mb-1"><Globe size={12}/> REGION</div>
+                    <span className="text-slate-300 font-bold text-lg">GLOBAL</span>
+                </div>
+             </div>
 
-          <button
-            onClick={() => {
-              cancelSearch();
-              onCancel();
-            }}
-            className="px-6 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-semibold transition-colors"
-          >
-            Cancel Search
-          </button>
+             <button
+                onClick={() => { cancelSearch(); onCancel(); }}
+                className="mt-8 text-slate-500 hover:text-red-400 text-xs uppercase tracking-widest hover:underline transition-colors"
+             >
+                Abort Search
+             </button>
+          </div>
         </div>
       )}
     </div>

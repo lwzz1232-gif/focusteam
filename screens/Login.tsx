@@ -7,6 +7,7 @@ import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { Lock, Mail, User as UserIcon, AlertCircle, CheckCircle2, Chrome, FileText, X, ShieldCheck, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { AuthMascot } from '../components/AuthMascot';
 import { Logo } from '../components/Logo';
+import { ToastNotification } from '../components/ToastNotification';
 
 // PASTE THIS RIGHT AFTER YOUR IMPORTS
 const useMousePosition = () => {
@@ -40,6 +41,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onBack }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [signupSuccess, setSignupSuccess] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   // --- NEW STATE FOR PASSWORD VISIBILITY ---
   const [showPassword, setShowPassword] = useState(false);
@@ -52,12 +54,18 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onBack }) => {
     }
     try {
       setIsLoading(true);
+      setError(""); // Clear previous errors
       await sendPasswordResetEmail(auth, email);
-      alert("Password reset email sent! Check your inbox.");
-      setError(""); // Clear any previous errors
+      setToast({
+        message: "Almost there! We've sent a secure reset link to your email. If you don't see it in a minute, please check your spam or junk folder—our messages sometimes end up there!",
+        type: 'success'
+      });
     } catch (err: any) {
       console.error(err);
-      setError(getFriendlyError(err.code));
+      setToast({
+        message: "Oops! There was an issue processing your request. Please check your email address and try again, or contact support.",
+        type: 'error'
+      });
     } finally {
       setIsLoading(false);
     }
@@ -314,7 +322,13 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onBack }) => {
 
   return (
     <div className="flex-1 flex items-center justify-center p-4 relative overflow-hidden">
-      
+      {toast && (
+        <ToastNotification
+            message={toast.message}
+            type={toast.type}
+            onClose={() => setToast(null)}
+        />
+      )}
       {/* --- START COOL BACKGROUND --- */}
       <div className="fixed inset-0 pointer-events-none z-0">
         <div className="absolute inset-0 bg-[#05050A]"></div>

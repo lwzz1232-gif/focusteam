@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Button } from '../components/Button';
 import { User } from '../types';
 import { auth, db, googleProvider } from '../utils/firebaseConfig';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, signInWithPopup, sendEmailVerification, sendPasswordResetEmail } from 'firebase/auth'; 
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, signInWithPopup, sendEmailVerification, sendPasswordResetEmail, signOut } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { Lock, Mail, User as UserIcon, AlertCircle, CheckCircle2, Chrome, FileText, X, ShieldCheck, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { AuthMascot } from '../components/AuthMascot';
@@ -133,8 +133,9 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onBack }) => {
 
            // FIX: Don't sign out. Just let the App redirect them to Dashboard automatically.
             if (isSignup && !isGoogle) {
-                 // We do nothing here. The App.tsx will detect the new user 
-                 // and send them to the Dashboard instantly.
+                
+               await signOut(auth);
+                setSignupSuccess(true);
             }
         }
 

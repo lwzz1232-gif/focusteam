@@ -101,7 +101,7 @@ export const App: React.FC = () => {
       }
     } else {
       if (currentScreen !== Screen.SPLASH && currentScreen !== Screen.LOGIN && currentScreen !== Screen.LANDING) {
-        setCurrentScreen(Screen.LANDING); // Changed from LOGIN
+        setCurrentScreen(Screen.LOGIN);
       }
     }
   }

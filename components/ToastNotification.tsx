@@ -10,16 +10,17 @@ export const ToastNotification: React.FC<ToastNotificationProps> = ({ message, t
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
+    // 1. Trigger animation in
     setVisible(true);
-    
-    // Timer to start sliding out
+
+    // 2. Start fading out after 4 seconds
     const fadeTimer = setTimeout(() => {
       setVisible(false);
     }, 4000);
 
-    // Timer to actually kill the component
+    // 3. ACTUAL FIX: Call onClose after animation finishes (4.5s)
     const removeTimer = setTimeout(() => {
-      onClose();
+      onClose(); 
     }, 4500);
 
     return () => {
@@ -28,37 +29,36 @@ export const ToastNotification: React.FC<ToastNotificationProps> = ({ message, t
     };
   }, [onClose]);
 
-  // Premium Styles
   const isSuccess = type === 'success';
   
-  // Dynamic styles based on type
-  const borderColor = isSuccess ? 'border-green-500/50' : 'border-red-500/50';
-  const glowColor = isSuccess ? 'shadow-green-500/20' : 'shadow-red-500/20';
-  const iconColor = isSuccess ? 'text-green-400' : 'text-red-400';
-  const progressColor = isSuccess ? 'bg-green-400' : 'bg-red-400';
+  // Fancy Styles
+  const borderColor = isSuccess ? 'border-emerald-500/50' : 'border-red-500/50';
+  const glowColor = isSuccess ? 'shadow-emerald-500/20' : 'shadow-red-500/20';
+  const iconColor = isSuccess ? 'text-emerald-400' : 'text-red-400';
+  const progressColor = isSuccess ? 'bg-emerald-500' : 'bg-red-500';
 
   return (
     <div
-      className={`fixed top-5 left-1/2 z-[1000] flex flex-col
-        /* Centering Logic */
+      className={`fixed top-5 left-1/2 z-[9999] flex flex-col
+        /* Centering */
         transform -translate-x-1/2
         
-        /* Glassmorphism & Borders */
+        /* Glass Look */
         bg-gray-900/90 backdrop-blur-md border ${borderColor}
         
-        /* Shape & Shadows */
+        /* Shadows & Shape */
         rounded-xl shadow-2xl ${glowColor}
         
         /* Layout */
-        p-0 overflow-hidden min-w-[320px]
+        min-w-[320px] overflow-hidden
         
-        /* Animation Classes */
+        /* Animation */
         transition-all duration-500 cubic-bezier(0.175, 0.885, 0.32, 1.275)
         ${visible ? 'translate-y-0 opacity-100 scale-100' : '-translate-y-full opacity-0 scale-95'}
       `}
     >
       <div className="flex items-center p-4">
-        {/* SVG Icon */}
+        {/* Icon Bubble */}
         <div className={`p-2 rounded-full bg-white/5 mr-3 ${iconColor}`}>
           {isSuccess ? (
              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -71,7 +71,7 @@ export const ToastNotification: React.FC<ToastNotificationProps> = ({ message, t
           )}
         </div>
 
-        {/* Text */}
+        {/* Text Content */}
         <div className="flex-1">
           <h4 className={`text-sm font-bold ${iconColor}`}>
             {isSuccess ? 'Success' : 'Error'}
@@ -79,9 +79,9 @@ export const ToastNotification: React.FC<ToastNotificationProps> = ({ message, t
           <p className="text-sm text-gray-300 font-medium">{message}</p>
         </div>
 
-        {/* Close Button */}
+        {/* Close X Button */}
         <button 
-          onClick={() => setVisible(false)} 
+          onClick={() => setVisible(false)} // Starts the fade out early
           className="text-gray-500 hover:text-white transition-colors ml-4"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -90,7 +90,7 @@ export const ToastNotification: React.FC<ToastNotificationProps> = ({ message, t
         </button>
       </div>
 
-      {/* Progress Bar Animation */}
+      {/* Progress Bar */}
       <div className="h-1 w-full bg-gray-700/50">
         <div 
           className={`h-full ${progressColor} transition-all ease-linear`}

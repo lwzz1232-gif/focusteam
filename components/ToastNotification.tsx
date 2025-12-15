@@ -9,29 +9,35 @@ interface ToastNotificationProps {
 export const ToastNotification: React.FC<ToastNotificationProps> = ({ message, type, onClose }) => {
   const [visible, setVisible] = useState(false);
 
+  // Function to handle the removal (animation -> wait -> unmount)
+  const handleDismiss = () => {
+    setVisible(false); // 1. Start fading out
+    setTimeout(() => {
+      onClose();       // 2. Actually remove from DOM after 500ms
+    }, 500);
+  };
+
   useEffect(() => {
-    // 1. Trigger animation in
+    // 1. Animate in immediately
     setVisible(true);
 
-    // 2. Start fading out after 4 seconds
-    const fadeTimer = setTimeout(() => {
-      setVisible(false);
+    // 2. Set auto-dismiss timer (4 seconds)
+    const autoDismissTimer = setTimeout(() => {
+      handleDismiss();
     }, 4000);
 
-    // 3. ACTUAL FIX: Call onClose after animation finishes (4.5s)
-    const removeTimer = setTimeout(() => {
-      onClose(); 
-    }, 4500);
-
-    return () => {
-      clearTimeout(fadeTimer);
-      clearTimeout(removeTimer);
-    };
-  }, [onClose]);
+    // CLEANUP
+    return () => clearTimeout(autoDismissTimer);
+    
+    // IMPORTANT: The dependency array is empty []. 
+    // This ignores updates from the parent (like mouse movements), 
+    // preventing the toast from "resurrecting".
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); 
 
   const isSuccess = type === 'success';
-  
-  // Fancy Styles
+
+  // Styles
   const borderColor = isSuccess ? 'border-emerald-500/50' : 'border-red-500/50';
   const glowColor = isSuccess ? 'shadow-emerald-500/20' : 'shadow-red-500/20';
   const iconColor = isSuccess ? 'text-emerald-400' : 'text-red-400';
@@ -40,25 +46,16 @@ export const ToastNotification: React.FC<ToastNotificationProps> = ({ message, t
   return (
     <div
       className={`fixed top-5 left-1/2 z-[9999] flex flex-col
-        /* Centering */
         transform -translate-x-1/2
-        
-        /* Glass Look */
         bg-gray-900/90 backdrop-blur-md border ${borderColor}
-        
-        /* Shadows & Shape */
         rounded-xl shadow-2xl ${glowColor}
-        
-        /* Layout */
         min-w-[320px] overflow-hidden
-        
-        /* Animation */
         transition-all duration-500 cubic-bezier(0.175, 0.885, 0.32, 1.275)
         ${visible ? 'translate-y-0 opacity-100 scale-100' : '-translate-y-full opacity-0 scale-95'}
       `}
     >
       <div className="flex items-center p-4">
-        {/* Icon Bubble */}
+        {/* Icon */}
         <div className={`p-2 rounded-full bg-white/5 mr-3 ${iconColor}`}>
           {isSuccess ? (
              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -71,7 +68,7 @@ export const ToastNotification: React.FC<ToastNotificationProps> = ({ message, t
           )}
         </div>
 
-        {/* Text Content */}
+        {/* Text */}
         <div className="flex-1">
           <h4 className={`text-sm font-bold ${iconColor}`}>
             {isSuccess ? 'Success' : 'Error'}
@@ -79,10 +76,10 @@ export const ToastNotification: React.FC<ToastNotificationProps> = ({ message, t
           <p className="text-sm text-gray-300 font-medium">{message}</p>
         </div>
 
-        {/* Close X Button */}
+        {/* Close Button - Now calls handleDismiss */}
         <button 
-          onClick={() => setVisible(false)} // Starts the fade out early
-          className="text-gray-500 hover:text-white transition-colors ml-4"
+          onClick={handleDismiss} 
+          className="text-gray-500 hover:text-white transition-colors ml-4 p-1 hover:bg-white/10 rounded-md"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

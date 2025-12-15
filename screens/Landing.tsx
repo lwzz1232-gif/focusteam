@@ -237,7 +237,7 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
                          </div>
                       </div>
                       <div className="absolute bottom-3 left-3 bg-blue-600/80 backdrop-blur px-2 py-1 rounded text-[10px] font-mono text-white flex items-center gap-1">
-                         <span className="w-1.5 h-1.5 bg-white rounded-full animate-bounce"></span> SARAH IS TYPING...
+                         
                       </div>
                    </div>
                 </div>

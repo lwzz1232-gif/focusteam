@@ -16,6 +16,6 @@
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["node_modules", "dist", "vite.config.ts"]
+  "include": ["src", "types.ts", "App.tsx", "index.tsx", "screens", "hooks"],
+  "exclude": ["node_modules", "dist", "vite.config.ts", "jest.config.cjs"]
 }

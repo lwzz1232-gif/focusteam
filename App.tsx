@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { Layout } from './components/Layout';
 import { Splash } from './screens/Splash';
 import { Login } from './screens/Login';
@@ -8,129 +8,78 @@ import { Matching } from './screens/Matching';
 import { Negotiation } from './screens/Negotiation';
 import { LiveSession } from './screens/LiveSession';
 import { Admin } from './screens/Admin';
-import { useAuth } from './hooks/useAuth';
-import { Screen, SessionConfig, Partner, SessionType, SessionDuration, SessionMode } from './types';
+import { Screen, SessionConfig, Partner, SessionDuration, User } from './types';
 import { db } from './utils/firebaseConfig';
-import { collection, query, where, getDocs, onSnapshot, doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { getAuth, signOut } from 'firebase/auth'; 
-import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { doc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { getAuth, signOut } from 'firebase/auth';
+import { useAppContext, ActionType } from './context/AppContext';
+import withAuth from '../hocs/withAuth';
 
-export const App: React.FC = () => {
-  // SAFETY CHECK - if auth hook fails
-  let authHook = null;
-  try {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    authHook = useAuth();
-  } catch (e) {
-    console.error("Auth hook failed:", e);
-    return (
-      <div className="w-screen h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
-        <div className="max-w-md w-full bg-red-500/10 border border-red-500/50 rounded-xl p-6 text-center">
-          <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-            <AlertTriangle size={32} className="text-red-500" />
-          </div>
-          <h3 className="text-xl font-bold text-white mb-2">Critical Error</h3>
-          <p className="text-slate-300 mb-4">Authentication system failed to load</p>
-          <button 
-            onClick={() => window.location.reload()}
-            className="w-full bg-white text-black font-bold py-3 rounded-lg hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"
-          >
-            <RefreshCw size={18} /> Reload App
-          </button>
-        </div>
-      </div>
-    );
-  }
+interface AppProps {
+  user: User | null;
+}
 
-  const { user, loading } = authHook;
-  const [currentScreen, setCurrentScreen] = useState<Screen>(Screen.SPLASH);
-  const [sessionConfig, setSessionConfig] = useState<SessionConfig>({
-    type: SessionType.STUDY,
-    duration: SessionDuration.MIN_30,
-    mode: SessionMode.DEEP_WORK,
-    preTalkMinutes: 5,
-    postTalkMinutes: 5
-  });
-  const [partner, setPartner] = useState<Partner | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+const App: React.FC<AppProps> = ({ user }) => {
+  const { state, dispatch } = useAppContext();
+  const { currentScreen, sessionConfig, partner, sessionId } = state;
 
-  // --- NEW: HANDLE LOGOUT FUNCTION ---
+  useEffect(() => {
+    dispatch({ type: ActionType.SET_USER, payload: user });
+  }, [user, dispatch]);
+
   const handleLogout = async () => {
     try {
       const auth = getAuth();
       await signOut(auth);
-      setPartner(null); // Clear session state
-      setSessionId(null);
-      setCurrentScreen(Screen.LOGIN);
+      dispatch({ type: ActionType.LOGOUT });
     } catch (error) {
       console.error("Error signing out:", error);
     }
   };
 
-  // --- NEW: INSTANT BAN CHECK ---
-  // Listens to the user's document in real-time. If they get banned, kicks them out.
   useEffect(() => {
     if (!user?.id) return;
 
     const unsub = onSnapshot(doc(db, 'users', user.id), (docSnap) => {
         if (docSnap.exists()) {
             const data = docSnap.data();
-            // Check if banned
             if (data.bannedUntil && data.bannedUntil > Date.now()) {
                 const reason = data.banReason || "Violation of Terms";
                 alert(`You have been banned.\nReason: ${reason}`);
-                handleLogout(); // Force logout immediately
+                handleLogout();
             }
         }
     });
 
-    return () => unsub(); // Cleanup listener
-  }, [user?.id]); // Re-run if user changes
+    return () => unsub();
+  }, [user?.id]);
 
   useEffect(() => {
-    return () => {
-      // Clean up any subscriptions
-    };
-  }, []);
-
- useEffect(() => {
-  if (!loading) {
     if (user) {
       if (currentScreen === Screen.LOGIN || currentScreen === Screen.LANDING) {
-        setCurrentScreen(Screen.DASHBOARD);
+        dispatch({ type: ActionType.SET_SCREEN, payload: Screen.DASHBOARD });
       }
     } else {
       if (currentScreen !== Screen.SPLASH && currentScreen !== Screen.LOGIN && currentScreen !== Screen.LANDING) {
-        setCurrentScreen(Screen.LOGIN);
+        dispatch({ type: ActionType.SET_SCREEN, payload: Screen.LOGIN });
       }
     }
-  }
-}, [user, loading, currentScreen]);
+  }, [user, currentScreen, dispatch]);
 
-const handleSplashComplete = () => {
-  if (user) {
-    setCurrentScreen(Screen.DASHBOARD);
-  } else {
-    setCurrentScreen(Screen.LANDING);
-  }
-};
-  // --- UPDATED: Async to handle Test Session Creation ---
+  const handleSplashComplete = () => {
+    if (user) {
+      dispatch({ type: ActionType.SET_SCREEN, payload: Screen.DASHBOARD });
+    } else {
+      dispatch({ type: ActionType.SET_SCREEN, payload: Screen.LANDING });
+    }
+  };
+
   const handleStartMatch = async (config: SessionConfig) => {
-    setSessionConfig(config);
-    
-    // TEST MODE: Skip matching for admins AND create a dummy session doc
     if (config.duration === SessionDuration.TEST && (user?.role === 'admin' || user?.role === 'dev')) {
       const botId = 'bot-' + Date.now();
-      const botPartner: Partner = {
-        id: botId,
-        name: 'Test Bot',
-        type: config.type
-      };
-      
+      const botPartner: Partner = { id: botId, name: 'Test Bot', type: config.type };
       const testSessionId = `TEST_${user.id}_${Date.now()}`;
-      
       try {
-          // Create a real document so LiveSession listeners have something to sync with
           await setDoc(doc(db, 'sessions', testSessionId), {
               type: config.type,
               config,
@@ -141,118 +90,63 @@ const handleSplashComplete = () => {
               ],
               createdAt: serverTimestamp(),
               started: true,
-              phase: 'ICEBREAKER', // Initialize phase so timer starts
+              phase: 'ICEBREAKER',
               status: 'active'
           });
-          
-          setPartner(botPartner);
-          setSessionId(testSessionId);
-          setCurrentScreen(Screen.SESSION); // Skip matching & negotiation
+          dispatch({ type: ActionType.MATCH_FOUND, payload: { partner: botPartner, sessionId: testSessionId } });
       } catch (e) {
           console.error("Failed to create test session:", e);
           alert("Error starting test mode. Check console.");
       }
     } else {
-      // NORMAL USER FLOW (Unchanged)
-      setCurrentScreen(Screen.MATCHING);
+      dispatch({ type: ActionType.START_MATCH, payload: config });
     }
   };
 
-  const handleMatched = (partner: Partner, sessionId: string) => {
-    console.log(`[APP] Match found! Partner:`, partner, 'SessionId:', sessionId);
-    
-    setPartner(partner);
-    setSessionId(sessionId);
-    
-    // Move to negotiation immediately after match
-    setCurrentScreen(Screen.NEGOTIATION);
-  };
-
-  const handleNegotiationComplete = (finalConfig: SessionConfig) => {
-    setSessionConfig(finalConfig);
-    setCurrentScreen(Screen.SESSION);
-  };
-
-  const handleCancelMatch = () => {
-    setPartner(null);
-    setSessionId(null);
-    setCurrentScreen(Screen.DASHBOARD);
-  };
-
-const handleEndSession = () => {
-    setPartner(null);
-    setSessionId(null);
-    setCurrentScreen(Screen.DASHBOARD);
-  };
-
-  // 1. CHECK FOR LANDING PAGE (Render without Layout)
   if (currentScreen === Screen.LANDING) {
-    return (
-      <Landing 
-        onGetStarted={() => setCurrentScreen(Screen.LOGIN)}
-        onSignIn={() => setCurrentScreen(Screen.LOGIN)}
-      />
-    );
+    return <Landing onGetStarted={() => dispatch({ type: ActionType.SET_SCREEN, payload: Screen.LOGIN })} onSignIn={() => dispatch({ type: ActionType.SET_SCREEN, payload: Screen.LOGIN })} />;
   }
 
-  // 2. RENDER EVERYTHING ELSE (Inside Layout)
   return (
     <Layout
-      user={user} 
+      user={user}
       currentScreen={currentScreen}
-      onLogout={handleLogout} 
-      onAdminClick={() => setCurrentScreen(Screen.ADMIN)}
+      onLogout={handleLogout}
+      onAdminClick={() => dispatch({ type: ActionType.SET_SCREEN, payload: Screen.ADMIN })}
     >
       {currentScreen === Screen.SPLASH && <Splash onComplete={handleSplashComplete} />}
-
-      {currentScreen === Screen.LOGIN && (
-  <Login 
-    onLogin={() => {}} 
-    onBack={() => setCurrentScreen(Screen.LANDING)} 
-  />
-)}
-
-      {currentScreen === Screen.DASHBOARD && user && (
-        <Dashboard 
-          user={user} 
-          onStartMatch={handleStartMatch}
-          onLogout={handleLogout} 
-        />
-      )}
-      
+      {currentScreen === Screen.LOGIN && <Login onBack={() => dispatch({ type: ActionType.SET_SCREEN, payload: Screen.LANDING })} />}
+      {currentScreen === Screen.DASHBOARD && user && <Dashboard user={user} onStartMatch={handleStartMatch} onLogout={handleLogout} />}
       {currentScreen === Screen.MATCHING && user && (
-        <Matching 
+        <Matching
           user={user}
-          config={sessionConfig} 
-          onMatched={handleMatched}
-          onCancel={handleCancelMatch}
+          config={sessionConfig}
+          onMatched={(partner, sessionId) => dispatch({ type: ActionType.MATCH_FOUND, payload: { partner, sessionId } })}
+          onCancel={() => dispatch({ type: ActionType.CANCEL_MATCH })}
         />
       )}
-
       {currentScreen === Screen.NEGOTIATION && partner && user && (
         <Negotiation
           config={sessionConfig}
           partner={partner}
-          sessionId={sessionId!} 
-          userId={user.id}       
-          onNegotiationComplete={handleNegotiationComplete}
-          onSkipMatch={handleCancelMatch}
+          sessionId={sessionId!}
+          userId={user.id}
+          onNegotiationComplete={(finalConfig) => dispatch({ type: ActionType.NEGOTIATION_COMPLETE, payload: finalConfig })}
+          onSkipMatch={() => dispatch({ type: ActionType.CANCEL_MATCH })}
         />
       )}
-
       {currentScreen === Screen.SESSION && user && partner && sessionId && (
-        <LiveSession 
+        <LiveSession
           user={user}
           partner={partner}
           config={sessionConfig}
           sessionId={sessionId}
-          onEndSession={handleEndSession}
+          onEndSession={() => dispatch({ type: ActionType.END_SESSION })}
         />
       )}
-
-      {currentScreen === Screen.ADMIN && <Admin onBack={() => setCurrentScreen(Screen.DASHBOARD)} />}
+      {currentScreen === Screen.ADMIN && <Admin onBack={() => dispatch({ type: ActionType.SET_SCREEN, payload: Screen.DASHBOARD })} />}
     </Layout>
   );
 };
 
-export default App;
+export default withAuth(App);

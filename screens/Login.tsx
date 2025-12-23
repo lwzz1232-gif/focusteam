@@ -22,12 +22,11 @@ const useMousePosition = () => {
 };
 
 interface LoginProps {
-  onLogin: (user: User) => void;
   onBack: () => void; 
 }
 
 
-export const Login: React.FC<LoginProps> = ({ onLogin, onBack }) => {
+export const Login: React.FC<LoginProps> = ({ onBack }) => {
   const mouse = useMousePosition();
   const [isSignup, setIsSignup] = useState(false);
   const [email, setEmail] = useState('');

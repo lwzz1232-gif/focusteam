@@ -8,7 +8,8 @@ interface LogoProps {
 
 export const Logo: React.FC<LogoProps> = ({ className = "w-10 h-10", animated = false }) => {
   return (
-    <svg 
+    <svg
+      data-testid="focustwin-logo"
       viewBox="0 0 100 100" 
       className={`${className} ${animated ? 'drop-shadow-[0_0_25px_rgba(59,130,246,0.6)]' : ''}`}
       fill="none" 

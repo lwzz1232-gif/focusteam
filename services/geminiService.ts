@@ -9,8 +9,8 @@ const getEnv = (key: string) => {
   return '';
 };
 
-// Use NEXT_PUBLIC_GEMINI_API_KEY for client-side access in Vite
-const apiKey = getEnv('NEXT_PUBLIC_GEMINI_API_KEY');
+// Use VITE_GEMINI_API_KEY for client-side access in Vite
+const apiKey = getEnv('VITE_GEMINI_API_KEY');
 
 let ai: GoogleGenAI | null = null;
 if (apiKey) {

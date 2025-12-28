@@ -39,6 +39,7 @@ export const Splash: React.FC<SplashProps> = ({ onComplete }) => {
   return (
     <div 
         ref={containerRef}
+        data-testid="splash-screen"
         className="flex-1 flex flex-col items-center justify-center bg-black relative overflow-hidden"
     >
       {/* 1. Custom Animation for the leaks to drift slowly */}

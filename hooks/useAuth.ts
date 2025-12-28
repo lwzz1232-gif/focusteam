@@ -7,7 +7,7 @@ import { User } from '../types';
 // Strict Dev/Admin Whitelist
 // These accounts will automatically get 'dev' role upon login/signup
 // Admin Whitelist - these emails automatically get admin role
-const ADMIN_EMAILS = ['benchoaib2@gmail.com', 'kirito63561@gmail.com'];
+const ADMIN_EMAILS = (import.meta.env.VITE_ADMIN_EMAILS || '').split(',');
 
 export const useAuth = () => {
   const [user, setUser] = useState<User | null>(null);

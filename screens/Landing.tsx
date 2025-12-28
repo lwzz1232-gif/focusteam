@@ -180,6 +180,7 @@ export const Landing: React.FC<LandingProps> = ({ onGetStarted, onSignIn }) => {
               We match you with a partner who selected the same duration. 
               <span className="text-slate-200"> Cameras on. Mics off. Zero distractions.</span>
             </p>
+            <p className="text-lg md:text-xl text-slate-400 max-w-2xl mx-auto leading-relaxed text-center">A new way to focus.</p>
           </Reveal>
 
           <Reveal delay={300} center width="100%">

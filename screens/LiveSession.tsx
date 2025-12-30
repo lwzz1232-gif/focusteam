@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Partner, SessionPhase, User, SessionConfig, SessionDuration, TodoItem } from '../types';
+import { Partner, SessionPhase, SessionConfig, SessionDuration, TodoItem } from '../types';
 import { Button } from '../components/Button';
 import { generateIcebreaker } from '../services/geminiService';
 import { Mic, MicOff, Video, VideoOff, Sparkles, LogOut, User as UserIcon, MessageSquare, ListChecks, Flag, X, AlertTriangle, HeartCrack, CheckCircle2 } from 'lucide-react';
@@ -10,29 +10,22 @@ import { useChat } from '../hooks/useChat';
 import { useWebRTC } from '../hooks/useWebRTC';
 import { db } from '../utils/firebaseConfig';
 import { collection, query, where, updateDoc, doc, addDoc, onSnapshot, deleteDoc, serverTimestamp, increment } from 'firebase/firestore';
+import { useAppContext } from '../context/AppContext';
 
-interface LiveSessionProps {
-  user: User;
-  partner: Partner;
-  config: SessionConfig;
-  sessionId: string;
-  onEndSession: () => void;
-}
+export const LiveSession: React.FC = () => {
+  const { state, dispatch } = useAppContext();
+  const { user, partner, sessionConfig, sessionId } = state;
+  const config = sessionConfig;
 
-export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config, sessionId, onEndSession }) => {
-  const isTest = config.duration === SessionDuration.TEST;
-  // --- LOGIC STATE ---
+  const isTest = config?.duration === SessionDuration.TEST;
   const [phase, setPhase] = useState<SessionPhase>(SessionPhase.ICEBREAKER);
-  const [timeLeft, setTimeLeft] = useState(isTest ? 30 : config.preTalkMinutes * 60);
+  const [timeLeft, setTimeLeft] = useState(isTest ? 30 : (config?.preTalkMinutes || 5) * 60);
   const [startTime] = useState(Date.now());
   const [isInitiator, setIsInitiator] = useState(false);
   const [isReadyForWebRTC, setIsReadyForWebRTC] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
-  // Ref to track phase inside Firebase listeners
   const phaseRef = useRef<SessionPhase>(SessionPhase.ICEBREAKER);
-  // ADDED: Track the server-side start time of the current phase
   const phaseStartTimeRef = useRef<number | null>(null);
-  // --- UI STATE ---
   const [micEnabled, setMicEnabled] = useState(true);
   const [camEnabled, setCamEnabled] = useState(true);
   const [manualMicToggle, setManualMicToggle] = useState(true);
@@ -42,69 +35,48 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [isTaskBoardOpen, setIsTaskBoardOpen] = useState(false);
   const [showUI, setShowUI] = useState(true);
-  // REPLACED: Floating Emojis -> Ripples & Aura
   const [ripples, setRipples] = useState<{ id: number, x: number, y: number }[]>([]);
   const [aura, setAura] = useState<'neutral' | 'fire' | 'power' | 'wave' | null>(null);
-  // Floating Messages State (Chat bubbles)
   const [floatingMessages, setFloatingMessages] = useState<{ id: string, text: string, sender: string }[]>([]);
   const [isInteracting, setIsInteracting] = useState(false);
-  // EXIT MODAL STATE
   const [exitModalStep, setExitModalStep] = useState<0 | 1 | 2>(0);
-  // Report State
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState('Inappropriate Behavior');
   const [reportDetails, setReportDetails] = useState('');
-  // Draggable Self-Video State
   const [selfPos, setSelfPos] = useState({ x: 20, y: 100 });
   const [isDragging, setIsDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
-  // Anti-Spam Ref
   const lastReactionTime = useRef<number>(0);
   const [myTasks, setMyTasks] = useState<TodoItem[]>([]);
   const [partnerTasks, setPartnerTasks] = useState<TodoItem[]>([]);
-  // Refs
   const myVideoRef = useRef<HTMLVideoElement>(null);
   const partnerVideoRef = useRef<HTMLVideoElement>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const auraTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastMsgCount = useRef(0);
-  // ---------------------------------------------------------------------------
-  // ADDED: POMODORO LOGIC START
-  // ---------------------------------------------------------------------------
-  // 1. Calculate total expected focus duration to determine cycles
-  // FIX: Don't subtract talk time. config.duration IS the focus time.
-  const calculatedFocusDuration = isTest ? 30 : config.duration * 60;
-  const modeStr = String(config.mode).toUpperCase();
-  // 2. Check if mode is Pomodoro (handling potentially untyped config from props)
-  const isPomodoroMode = (config as any).mode === 'POMODORO' || (config as any).mode === 1;
-  // 3. Helper to determine current Pomodoro state based on timeLeft
+
+  const onEndSession = () => {
+    dispatch({ type: 'END_SESSION' });
+  };
+
+  const calculatedFocusDuration = isTest ? 30 : (config?.duration || 0) * 60;
+  const isPomodoroMode = (config as any)?.mode === 'POMODORO' || (config as any)?.mode === 1;
+
   const getPomodoroState = () => {
-    // Only apply during FOCUS phase and if enabled
     if (phase !== SessionPhase.FOCUS || !isPomodoroMode || isTest) {
       return { isPomodoroBreak: false, label: 'FOCUS' };
     }
-
-    // Calculate elapsed time in Focus phase
     const elapsed = calculatedFocusDuration - timeLeft;
-
-    // Standard Pomodoro: 25m Work + 5m Break = 30m (1800s) cycle
     const cycleDuration = 30 * 60;
     const workDuration = 25 * 60;
-
-    // Determine position in the current cycle
     const cyclePosition = elapsed % cycleDuration;
-
-    // If we are past the work duration in this cycle, it's a break
     const isBreak = cyclePosition >= workDuration;
-
-    return {
-      isPomodoroBreak: isBreak,
-      label: isBreak ? 'FOCUS • BREAK' : 'FOCUS • WORK'
-    };
+    return { isPomodoroBreak: isBreak, label: isBreak ? 'FOCUS • BREAK' : 'FOCUS • WORK' };
   };
+
   const { isPomodoroBreak, label: phaseLabel } = getPomodoroState();
   const prevPomodoroBreak = useRef(isPomodoroBreak);
-  // 4. Sound Effect Helper (Soft Ding)
+
   const playSoftDing = () => {
     try {
       const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
@@ -112,66 +84,50 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       const ctx = new AudioContext();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-
       osc.connect(gain);
       gain.connect(ctx.destination);
-
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5 (Soft Pitch)
-
-      // Soft attack and decay
+      osc.frequency.setValueAtTime(523.25, ctx.currentTime);
       gain.gain.setValueAtTime(0, ctx.currentTime);
-      gain.gain.linearRampToValueAtTime(0.1, ctx.currentTime + 0.1); // Low volume (0.1)
-      gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 2); // Slow fade
-
+      gain.gain.linearRampToValueAtTime(0.1, ctx.currentTime + 0.1);
+      gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 2);
       osc.start();
       osc.stop(ctx.currentTime + 2);
-    } catch (e) {
-      // Fallback or silence
-    }
+    } catch (e) {}
   };
-  // 5. Effect: Handle Work/Break Transitions (Audio & Mic)
+
   useEffect(() => {
     if (phase !== SessionPhase.FOCUS) return;
-
     if (isPomodoroBreak !== prevPomodoroBreak.current) {
-      // Transition detected
       playSoftDing();
-
       if (isPomodoroBreak) {
-        // Entering Break: Enable Mic
         setMicEnabled(true);
         setManualMicToggle(true);
       } else {
-        // Entering Work: Disable Mic
         setMicEnabled(false);
         setManualMicToggle(false);
       }
-
       prevPomodoroBreak.current = isPomodoroBreak;
     }
   }, [isPomodoroBreak, phase]);
-  // ---------------------------------------------------------------------------
-  // ADDED: POMODORO LOGIC END
-  // ---------------------------------------------------------------------------
-  // --- 1. SETUP & WEBRTC ---
+
   useEffect(() => {
-    if (!sessionId || !user.id || !partner.id) return;
+    if (!sessionId || !user?.id || !partner?.id) return;
     const amICaller = user.id < partner.id;
     setIsInitiator(amICaller);
     setIsReadyForWebRTC(true);
     setSessionReady(true);
-  }, [sessionId, user.id, partner.id]);
-  const { localStream, remoteStream } = useWebRTC(isReadyForWebRTC ? sessionId : '', user.id, isInitiator);
-  // --- 2. SYNC & REACTIONS (FIXED TIME SYNC) ---
+  }, [sessionId, user?.id, partner?.id]);
+
+  const { localStream, remoteStream } = useWebRTC(isReadyForWebRTC ? sessionId! : '', user!.id, isInitiator);
+
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || !user || !config) return;
 
     const unsub = onSnapshot(doc(db, 'sessions', sessionId), (docSnap) => {
       if (!docSnap.exists()) return;
       const data = docSnap.data();
 
-      // Save server timestamp locally
       if (data.phaseStartTime) {
         phaseStartTimeRef.current = data.phaseStartTime;
       }
@@ -180,7 +136,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
         setPhase(data.phase as SessionPhase);
         phaseRef.current = data.phase as SessionPhase;
 
-        // Handle Mic State on Phase Change
         if (data.phase === SessionPhase.FOCUS) {
           setMicEnabled(false);
           setManualMicToggle(false);
@@ -192,29 +147,22 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
         }
       }
 
-      // --- FIXED SYNC LOGIC ---
-      // Calculate remaining time based on Server Start Time
       if (data.phaseStartTime) {
         const now = Date.now();
         const elapsedSeconds = Math.floor((now - data.phaseStartTime) / 1000);
 
         let totalDurationForPhase = 0;
         if (data.phase === SessionPhase.ICEBREAKER) totalDurationForPhase = isTest ? 30 : config.preTalkMinutes * 60;
-        // FIX: Use full duration for focus
         else if (data.phase === SessionPhase.FOCUS) totalDurationForPhase = isTest ? 30 : config.duration * 60;
         else if (data.phase === SessionPhase.DEBRIEF) totalDurationForPhase = isTest ? 30 : config.postTalkMinutes * 60;
 
         const exactTimeLeft = Math.max(0, totalDurationForPhase - elapsedSeconds);
-
-        // Only update if difference is significant (drift > 2 seconds) to avoid jitter
-        // OR if we are initializing (timeLeft matches default)
         setTimeLeft(prev => {
           if (Math.abs(prev - exactTimeLeft) > 2) return exactTimeLeft;
           return prev;
         });
       }
 
-      // Reactions
       if (data.lastReaction && data.lastReaction.senderId !== user.id) {
         if (Date.now() - data.lastReaction.timestamp < 2000) {
           triggerAura(data.lastReaction.emoji);
@@ -227,14 +175,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       }
     });
     return () => unsub();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, user.id, config, isTest]);
-  // --- 3. ZEN MODE / MOUSE HANDLING ---
+  }, [sessionId, user, config, isTest, onEndSession]);
+
   useEffect(() => {
     const handleMouseMove = () => {
       setShowUI(true);
-
-      // In focus mode, hide UI faster (2s) to encourage work
       if (phase === SessionPhase.FOCUS) {
         if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
         if (!isInteracting) {
@@ -258,12 +203,9 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     };
   }, [phase, isInteracting]);
-  // --- 4. TIMER (With Local Countdown) ---
+
   useEffect(() => {
     if (phase === SessionPhase.COMPLETED) return;
-
-    // We still keep local interval for smooth seconds, 
-    // but the onSnapshot above corrects it if it drifts.
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) { handlePhaseTimeout(); return 0; }
@@ -272,30 +214,26 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     }, 1000);
     return () => clearInterval(timer);
   }, [phase]);
-  // --- FIXED: PHASE TRANSITION ---
+
   const handlePhaseTimeout = async () => {
     let nextPhase: SessionPhase | null = null;
     const currentP = phaseRef.current;
-
-    // Double check we haven't already moved (prevent double triggers)
-    // In a real app we might use a transition flag, but checking timeLeft or phase is decent
 
     if (currentP === SessionPhase.ICEBREAKER) nextPhase = SessionPhase.FOCUS;
     else if (currentP === SessionPhase.FOCUS) nextPhase = SessionPhase.DEBRIEF;
     else if (currentP === SessionPhase.DEBRIEF) nextPhase = SessionPhase.COMPLETED;
 
-    if (nextPhase) {
-      // IMPORTANT: Write the Timestamp! This fixes the sync issue.
+    if (nextPhase && sessionId) {
       await updateDoc(doc(db, 'sessions', sessionId), {
         phase: nextPhase,
         phaseStartTime: Date.now()
       }).catch(console.error);
     }
   };
-  // --- REACTION LOGIC ---
+
   const handleReaction = async (emoji: string) => {
     const now = Date.now();
-    if (now - lastReactionTime.current < 800) return;
+    if (now - lastReactionTime.current < 800 || !sessionId || !user) return;
     lastReactionTime.current = now;
 
     triggerAura(emoji);
@@ -304,29 +242,28 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       lastReaction: { emoji, senderId: user.id, timestamp: Date.now() }
     }).catch(console.error);
   };
+
   const triggerAura = (emoji: string) => {
     let type: 'fire' | 'power' | 'wave' = 'wave';
     if (emoji === '🔥') type = 'fire';
     if (emoji === '💯') type = 'power';
-
     setAura(type);
-
     if (auraTimeoutRef.current) clearTimeout(auraTimeoutRef.current);
     auraTimeoutRef.current = setTimeout(() => setAura(null), 2500);
   };
+
   const handlePartnerClick = (e: React.MouseEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-
     const id = Date.now();
     setRipples(prev => [...prev, { id, x, y }]);
     setTimeout(() => setRipples(prev => prev.filter(r => r.id !== id)), 1000);
     handleReaction('👋');
   };
-  // --- 5. REPORT ---
+
   const handleReportSubmit = async () => {
-    if (!reportReason) return;
+    if (!reportReason || !user || !partner || !sessionId) return;
     try {
       await addDoc(collection(db, 'reports'), {
         reporterId: user.id,
@@ -344,7 +281,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       console.error("Report error:", e);
     }
   };
-  // --- MEDIA ---
+
   useEffect(() => {
     if (myVideoRef.current && localStream) myVideoRef.current.srcObject = localStream;
     if (partnerVideoRef.current && remoteStream) {
@@ -352,6 +289,7 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       partnerVideoRef.current.play().catch(e => console.error("Autoplay failed", e));
     }
   }, [localStream, remoteStream]);
+
   useEffect(() => {
     if (localStream) {
       let trackEnabled = false;
@@ -360,18 +298,17 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       } else {
         trackEnabled = micEnabled;
       }
-
       localStream.getAudioTracks().forEach(t => t.enabled = trackEnabled);
       localStream.getVideoTracks().forEach(t => t.enabled = camEnabled);
     }
   }, [micEnabled, camEnabled, localStream, phase, isPomodoroBreak]);
-  // --- CHAT & TASK SYNC ---
-  const { messages: chatMessages, sendMessage } = useChat(sessionReady ? sessionId : '', user.id, user.name);
+
+  const { messages: chatMessages, sendMessage } = useChat(sessionReady ? sessionId! : '', user!.id, user!.name);
+
   useEffect(() => {
     if (chatMessages.length > lastMsgCount.current) {
       const lastMsg = chatMessages[chatMessages.length - 1];
-
-      if (lastMsg.senderId !== 'me' && !isChatOpen) {
+      if (lastMsg.senderId !== 'me' && !isChatOpen && partner) {
         setUnreadChatCount(prev => prev + 1);
         const id = Date.now().toString();
         setFloatingMessages(prev => [...prev, { id, text: lastMsg.text, sender: partner.name }]);
@@ -379,26 +316,29 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       }
       lastMsgCount.current = chatMessages.length;
     }
-
     if (isChatOpen) {
       setUnreadChatCount(0);
       lastMsgCount.current = chatMessages.length;
     }
-  }, [chatMessages, isChatOpen]);
+  }, [chatMessages, isChatOpen, partner]);
+
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || !user) return;
     const q = query(collection(db, 'sessions', sessionId, 'tasks'), where('ownerId', '!=', user.id));
     const unsub = onSnapshot(q, snap => setPartnerTasks(snap.docs.map(d => ({ ...d.data(), id: d.id } as TodoItem))));
     return () => unsub();
-  }, [sessionId, user.id]);
+  }, [sessionId, user]);
+
   const activePartnerTask = partnerTasks.find(t => !t.completed)?.text;
-  // --- DRAG ---
+
   const handleStartDrag = (clientX: number, clientY: number) => {
     setIsDragging(true);
     dragStart.current = { x: clientX - selfPos.x, y: clientY - selfPos.y };
   };
+
   const handleMouseDown = (e: React.MouseEvent) => handleStartDrag(e.clientX, e.clientY);
   const handleTouchStart = (e: React.TouchEvent) => handleStartDrag(e.touches[0].clientX, e.touches[0].clientY);
+
   useEffect(() => {
     const handleMove = (clientX: number, clientY: number) => {
       if (!isDragging) return;
@@ -421,38 +361,48 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
       window.removeEventListener('touchend', handleMouseUp);
     };
   }, [isDragging]);
-  // --- HANDLERS ---
+
   const handleAddTask = async (text: string) => {
+    if (!sessionId || !user) return;
     const newTask = { text, completed: false, ownerId: user.id, createdAt: serverTimestamp() };
     const docRef = await addDoc(collection(db, 'sessions', sessionId, 'tasks'), newTask);
     setMyTasks([...myTasks, { ...newTask, id: docRef.id } as any]);
   };
+
   const handleToggleTask = async (id: string) => {
+    if (!sessionId) return;
     const updated = myTasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t);
     setMyTasks(updated);
     const task = updated.find(t => t.id === id);
-    if (task) await updateDoc(doc(db, 'sessions', sessionId, 'tasks', id), { completed: task.completed }).catch(() => { });
+    if (task) await updateDoc(doc(db, 'sessions', sessionId, 'tasks', id), { completed: task.completed }).catch(() => {});
   };
+
   const handleDeleteTask = async (id: string) => {
+    if (!sessionId) return;
     setMyTasks(myTasks.filter(t => t.id !== id));
-    await deleteDoc(doc(db, 'sessions', sessionId, 'tasks', id)).catch(() => { });
+    await deleteDoc(doc(db, 'sessions', sessionId, 'tasks', id)).catch(() => {});
   };
+
   const finishSession = async (early: boolean) => {
     if (localStream) localStream.getTracks().forEach(t => t.stop());
-    if (early && sessionId) await updateDoc(doc(db, 'sessions', sessionId), { status: 'aborted', abortedBy: user.id }).catch(() => { });
+    if (early && sessionId && user) await updateDoc(doc(db, 'sessions', sessionId), { status: 'aborted', abortedBy: user.id }).catch(() => {});
     if (early) onEndSession();
     else setPhase(SessionPhase.COMPLETED);
   };
+
   const handleExitClick = () => {
     if (phase === SessionPhase.FOCUS) setExitModalStep(1);
     else if (confirm("Exit session?")) finishSession(true);
   };
+
   const confirmExitWithStrike = async () => {
+    if (!user) return;
     try {
       await updateDoc(doc(db, 'users', user.id), { strikes: increment(1), lastStrikeAt: Date.now() });
     } catch (e) { console.error(e); }
     finishSession(true);
   };
+
   const getAuraClass = () => {
     if (isPomodoroBreak) return 'border-emerald-500/60 shadow-[0_0_50px_rgba(16,185,129,0.4)]';
     if (!aura) return 'border-white/5';
@@ -460,6 +410,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
     if (aura === 'power') return 'border-emerald-500/60 shadow-[0_0_50px_rgba(16,185,129,0.4)]';
     return 'border-blue-400/60 shadow-[0_0_50px_rgba(96,165,250,0.4)]';
   };
+
+  if (!user || !partner || !config || !sessionId) {
+    return null; // Or some loading state
+  }
+
   return (
     <div className="absolute inset-0 bg-black overflow-hidden select-none font-sans">
 
@@ -485,7 +440,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
         </div>
       )}
 
-      {/* --- PARTNER VIDEO CONTAINER --- */}
       <div
         className={`absolute inset-0 z-10 transition-all duration-[1500ms] ease-in-out border-4 ${getAuraClass()} ${phase === SessionPhase.FOCUS ? 'scale-[0.98] rounded-2xl overflow-hidden' : ''}`}
         onClick={handlePartnerClick}
@@ -508,7 +462,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           </div>
         )}
 
-        {/* Ripples Layer */}
         <div className="absolute inset-0 pointer-events-none overflow-hidden">
           {ripples.map(r => (
             <div
@@ -527,7 +480,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           ))}
         </div>
 
-        {/* Partner Task HUD */}
         {activePartnerTask && showUI && (
           <div className="absolute bottom-8 left-0 right-0 flex justify-center pointer-events-none animate-in fade-in slide-in-from-bottom-2">
             <div className="bg-black/60 backdrop-blur-md border border-white/10 px-4 py-2 rounded-full flex items-center gap-2 max-w-[80%] shadow-2xl">
@@ -540,7 +492,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
 
       <div className={`absolute inset-0 z-20 pointer-events-none transition-opacity duration-[2000ms] ${phase === SessionPhase.FOCUS ? 'opacity-100 vignette' : 'opacity-0'}`} />
 
-      {/* --- FLOATING CHAT MESSAGES --- */}
       <div className="absolute bottom-32 left-0 right-0 z-30 flex flex-col items-center gap-2 pointer-events-none">
         {floatingMessages.map(msg => (
           <div key={msg.id} className="bg-black/60 backdrop-blur-md border border-white/10 px-4 py-2 rounded-full shadow-xl flex items-center gap-2 animate-[messageFloatUp_5s_ease-out_forwards]">
@@ -550,7 +501,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
         ))}
       </div>
 
-      {/* --- SELF VIDEO --- */}
       <div
         onMouseDown={handleMouseDown}
         onTouchStart={handleTouchStart}
@@ -564,14 +514,11 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
         </div>
       </div>
 
-      {/* --- MAIN UI LAYER --- */}
       <div className={`absolute inset-0 pointer-events-none z-40 transition-opacity duration-500 ${showUI ? 'opacity-100' : 'opacity-0'}`}>
 
-        {/* TOP BAR: TIMER & PHASE */}
         <div className="absolute top-4 md:top-6 left-0 right-0 flex justify-center pointer-events-none px-14 md:px-0">
           <div className={`backdrop-blur-xl border rounded-full px-5 py-2 flex items-center gap-3 shadow-2xl transition-all duration-700 ${phase === SessionPhase.FOCUS ? 'bg-black/80 border-red-500/20 text-red-50' : 'bg-slate-900/80 border-slate-700'}`}>
             <span className={`text-[10px] font-bold uppercase tracking-widest ${phase === SessionPhase.FOCUS ? (isPomodoroBreak ? 'text-emerald-400' : 'text-red-400') : 'text-slate-400'}`}>
-              {/* FIX: Check phase explicitly before showing label */}
               {phase === SessionPhase.ICEBREAKER ? 'ICEBREAKER' :
                 phase === SessionPhase.DEBRIEF ? 'DEBRIEF' :
                   phaseLabel}
@@ -583,7 +530,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           </div>
         </div>
 
-        {/* TOP BUTTONS */}
         <div className="absolute top-4 md:top-6 left-4 md:left-6 pointer-events-auto">
           <button
             onClick={() => setIsReportOpen(true)}
@@ -606,7 +552,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           </Button>
         </div>
 
-        {/* CHAT & TASKS */}
         <div
           className="pointer-events-auto"
           onMouseEnter={() => setIsInteracting(true)}
@@ -617,17 +562,14 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
           <TaskBoard isOpen={isTaskBoardOpen} onClose={() => setIsTaskBoardOpen(false)} myTasks={myTasks} partnerTasks={partnerTasks} onAddTask={handleAddTask} onToggleTask={handleToggleTask} onDeleteTask={handleDeleteTask} isRevealed={phase !== SessionPhase.FOCUS} canEdit={phase === SessionPhase.ICEBREAKER} partnerName={partner.name} />
         </div>
 
-        {/* BOTTOM CONTROLS */}
         <div className="absolute bottom-8 left-0 right-0 px-4 flex flex-col md:flex-row items-center justify-center gap-4 pointer-events-auto">
 
-          {/* Reactions */}
           <div className="bg-black/60 backdrop-blur-xl border border-white/10 rounded-full px-4 py-2 flex items-center gap-4 shadow-2xl order-1 md:order-none">
             <button onClick={() => handleReaction('🔥')} className="hover:scale-110 active:scale-95 transition-all text-xl grayscale hover:grayscale-0 opacity-80 hover:opacity-100" title="Send Motivation">🔥</button>
             <button onClick={() => handleReaction('💯')} className="hover:scale-110 active:scale-95 transition-all text-xl grayscale hover:grayscale-0 opacity-80 hover:opacity-100" title="Respect">💯</button>
             <button onClick={() => handleReaction('👋')} className="hover:scale-110 active:scale-95 transition-all text-xl grayscale hover:grayscale-0 opacity-80 hover:opacity-100" title="Wave">👋</button>
           </div>
 
-          {/* Main Controls */}
           <div className="bg-black/80 backdrop-blur-md border border-white/10 rounded-full p-2 flex items-center gap-2 shadow-2xl order-2 md:order-none">
             {phase === SessionPhase.ICEBREAKER && (
               <Button onClick={async () => { setIsLoadingIcebreaker(true); setIcebreaker(await generateIcebreaker(partner.type)); setIsLoadingIcebreaker(false); }} variant="ghost" className="rounded-full w-10 h-10 p-0 text-yellow-400 hover:bg-yellow-400/10">
@@ -684,7 +626,6 @@ export const LiveSession: React.FC<LiveSessionProps> = ({ user, partner, config,
             onMouseEnter={() => setIsInteracting(true)}
             onMouseLeave={() => setIsInteracting(false)}
           >
-            {/* Reports and Exit Modal content remains unchanged */}
             {isReportOpen && (
               <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4 pointer-events-auto">
                 <div className="flex justify-between items-center">

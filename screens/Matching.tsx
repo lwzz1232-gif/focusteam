@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { SessionConfig, Partner, User } from '../types';
+import { Partner, SessionConfig } from '../types';
 import { AlertTriangle, ExternalLink, X, Wifi } from 'lucide-react';
 import { useMatchmaking } from '../hooks/useMatchmaking';
 import { db } from '../utils/firebaseConfig';
 import { doc, onSnapshot, collection, addDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import Globe from 'react-globe.gl';
+import { useAppContext } from '../context/AppContext';
 
 // --- WARP SPEED COMPONENT (Lightweight Canvas) ---
 const WarpSpeed = () => {
@@ -101,20 +102,15 @@ const genRandomArcs = () => {
   }));
 };
 
-interface MatchingProps {
-  user: User;
-  config: SessionConfig;
-  onMatched: (partner: Partner, sessionId: string) => void;
-  onCancel: () => void;
-}
+export const Matching: React.FC = () => {
+  const { state, dispatch } = useAppContext();
+  const { user, sessionConfig } = state;
+  const config = sessionConfig; // for convenience
 
-export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onCancel }) => {
   const [statusText, setStatusText] = useState("Initializing Global Mesh...");
   const [sessionIdToWatch, setSessionIdToWatch] = useState<string | null>(null);
   const [hasCalledOnMatch, setHasCalledOnMatch] = useState(false);
   const [isInLobby, setIsInLobby] = useState(false);
-  
-  // NEW STATE: Controls the Warp Animation
   const [isWarping, setIsWarping] = useState(false);
 
   const lobbyTicketRef = useRef<string | null>(null);
@@ -132,14 +128,22 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const { status, joinQueue, cancelSearch, error } = useMatchmaking(user, (partner, sessionId) => {
+  const onMatched = (partner: Partner, sessionId: string) => {
+    dispatch({ type: 'MATCH_FOUND', payload: { partner, sessionId } });
+  };
+
+  const onCancel = () => {
+      dispatch({ type: 'CANCEL_MATCH' });
+  };
+
+  const { status, joinQueue, cancelSearch, error } = useMatchmaking(user!, (partner, sessionId) => {
     setSessionIdToWatch(sessionId);
   });
 
  useEffect(() => {
+    if (!user || !config) return;
     joinQueue(config);
     
-    // This helps delete the ghost if someone closes the tab
     const handleTabClose = () => {
        if (lobbyTicketRef.current) {
          deleteDoc(doc(db, 'waiting_room', lobbyTicketRef.current));
@@ -152,16 +156,15 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
       cancelSearch();
       if (lobbyTicketRef.current) deleteDoc(doc(db, 'waiting_room', lobbyTicketRef.current)).catch(console.error);
     };
-  }, [config, joinQueue, cancelSearch]);
+  }, [config, joinQueue, cancelSearch, user]);
 
-  // --- LOBBY LOGIC ---
   useEffect(() => {
     let timeoutId: NodeJS.Timeout;
     let isActive = true;
 
     if (status === 'SEARCHING' && !sessionIdToWatch && !isInLobby) {
         timeoutId = setTimeout(async () => {
-            if (!isActive || sessionIdToWatch || lobbyTicketRef.current) return;
+            if (!isActive || sessionIdToWatch || lobbyTicketRef.current || !user || !config) return;
             try {
                 const lobbyRef = await addDoc(collection(db, 'waiting_room'), {
                     userId: user.id, userName: user.name, config, createdAt: serverTimestamp()
@@ -181,9 +184,8 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
     return () => { clearTimeout(timeoutId); isActive = false; };
   }, [status, sessionIdToWatch, user, config, isInLobby]);
 
-  // --- MODIFIED SESSION LISTENER ---
   useEffect(() => {
-    if (!sessionIdToWatch || hasCalledOnMatch) return;
+    if (!sessionIdToWatch || hasCalledOnMatch || !user) return;
     const sessionRef = doc(collection(db, 'sessions'), sessionIdToWatch);
     
     const unsubscribe = onSnapshot(sessionRef, (snap) => {
@@ -197,11 +199,9 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
           const p = sessionData.participantInfo?.find((p: any) => p.userId !== user.id);
           
           if (p) {
-            // 1. TRIGGER WARP EFFECT
             setIsWarping(true);
             setStatusText("JUMPING TO HYPERSPACE...");
 
-            // 2. WAIT 2.5 SECONDS THEN CHANGE PAGE
             setTimeout(() => {
                 onMatched({ 
                     id: p.userId, 
@@ -217,13 +217,12 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
       if (Array.isArray(sessionData.participants) && sessionData.participants.length >= 2) triggerMatch();
     });
     return () => unsubscribe();
-  }, [sessionIdToWatch, user.id, onMatched, hasCalledOnMatch]);
+  }, [sessionIdToWatch, user, onMatched, hasCalledOnMatch]);
 
-  // Text Rotation
   useEffect(() => {
-    if(isWarping) return; // Don't rotate text if warping
+    if(isWarping) return;
     if (isInLobby) { setStatusText("Broadcasting to Public Lobby..."); return; }
-    if (status === 'SEARCHING') {
+    if (status === 'SEARCHING' && config) {
       const msgs = [`Scanning for ${config.type}...`, "Triangulating signal...", "Handshaking with peer network..."];
       let i = 0;
       const interval = setInterval(() => { i = (i + 1) % msgs.length; setStatusText(msgs[i]); }, 3000);
@@ -242,16 +241,15 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
     }
   }, []);
 
-  const indexLink = error && error.includes('https://console.firebase.google.com') ? error.match(/https:\/\/console\.firebase\.google\.com[^\s]*/)?.[0] : null;
+  if (!user || !config) {
+      return null;
+  }
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center bg-black relative overflow-hidden h-screen w-full">
       
-      {/* --- SHOW WARP EFFECT IF MATCHED --- */}
       {isWarping && <WarpSpeed />}
 
-      {/* --- 3D GLOBE --- */}
-      {/* We fade the globe out slightly when warping to emphasize the stars */}
       <div className={`absolute inset-0 z-0 transition-opacity duration-500 ${isWarping ? 'opacity-20' : 'opacity-100'}`}>
         <Globe
           ref={globeEl}
@@ -273,15 +271,12 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
         <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_30%,black_100%)]"></div>
       </div>
 
-      {/* --- UI --- */}
       {error ? (
         <div className="relative z-20 max-w-md w-full bg-red-950/80 border border-red-500/50 rounded-xl p-6 text-center backdrop-blur-md">
-          {/* ... Error UI ... */}
           <div className="text-white">Error: {error}</div>
           <button onClick={() => { cancelSearch(); onCancel(); }} className="text-slate-400 mt-4 underline">Cancel</button>
         </div>
       ) : (
-        // Hide UI when warping to make it cinematic
         <div className={`relative z-20 flex flex-col items-center w-full max-w-xl pointer-events-none select-none mt-32 transition-all duration-500 ${isWarping ? 'scale-110 opacity-0' : 'opacity-100'}`}>
           
           <div className="text-center space-y-4">

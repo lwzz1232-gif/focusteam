@@ -136,9 +136,19 @@ export const Matching: React.FC<MatchingProps> = ({ user, config, onMatched, onC
     setSessionIdToWatch(sessionId);
   });
 
-  useEffect(() => {
+ useEffect(() => {
     joinQueue(config);
+    
+    // This helps delete the ghost if someone closes the tab
+    const handleTabClose = () => {
+       if (lobbyTicketRef.current) {
+         deleteDoc(doc(db, 'waiting_room', lobbyTicketRef.current));
+       }
+    };
+    window.addEventListener('beforeunload', handleTabClose);
+
     return () => {
+      window.removeEventListener('beforeunload', handleTabClose);
       cancelSearch();
       if (lobbyTicketRef.current) deleteDoc(doc(db, 'waiting_room', lobbyTicketRef.current)).catch(console.error);
     };

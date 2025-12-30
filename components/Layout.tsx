@@ -232,15 +232,18 @@ export const Layout: React.FC<LayoutProps> = ({ children, user, currentScreen, o
                </button>
               )}
 
-              {/* FIX: Made the button more explicit and prevent event bubbling issues */}
+           {/* Logout button with "Are you sure?" confirmation */}
               {showLogout && (
                 <button 
                   type="button"
                   onClick={(e) => {
                     e.preventDefault();
-                    onLogout();
+                    const confirmed = window.confirm("Are you sure you want to log out?");
+                    if (confirmed) {
+                      onLogout();
+                    }
                   }}
-                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-full transition-colors cursor-pointer"
+                  className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-full transition-all cursor-pointer"
                   title="Logout"
                 >
                   <LogOut size={20} />

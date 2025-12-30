@@ -20,11 +20,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogo
   const [lobbyCount, setLobbyCount] = useState(0);
 
   // 2. LISTEN TO DATABASE
-  useEffect(() => {
+ useEffect(() => {
     const unsub = onSnapshot(collection(db, 'waiting_room'), (snap) => {
-      // Count everyone except myself
-      const count = snap.docs.filter(d => d.data().userId !== user.id).length;
-      setLobbyCount(count);
+      const now = Date.now();
+      const fiveMinutesAgo = now - (5 * 60 * 1000); // 5 minutes in milliseconds
+
+      const activePeople = snap.docs.filter(doc => {
+        const data = doc.data();
+        const isMe = data.userId === user.id;
+        
+        // If the person joined more than 5 minutes ago, we treat them as a "ghost"
+        const joinedAt = data.joinedAt ? data.joinedAt.toMillis() : 0;
+        const isFresh = joinedAt > fiveMinutesAgo;
+
+        return !isMe && isFresh;
+      });
+
+      setLobbyCount(activePeople.length);
     });
     return () => unsub();
   }, [user.id]);

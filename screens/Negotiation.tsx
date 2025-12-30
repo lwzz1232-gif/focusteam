@@ -5,9 +5,9 @@ import { Zap, Timer, CheckCircle2, User, Users, Clock } from 'lucide-react';
 import { doc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../utils/firebaseConfig';
 import * as THREE from 'three';
+import { useAppContext } from '../context/AppContext';
 
 // --- VISUAL: STARDUST & CONNECTION BACKGROUND ---
-// A slow, deep, ambient background that feels like "shared space"
 const StardustBackground = () => {
   const mountRef = useRef<HTMLDivElement>(null);
 
@@ -17,7 +17,6 @@ const StardustBackground = () => {
     const height = mountRef.current.clientHeight;
 
     const scene = new THREE.Scene();
-    // Deep dark fog for depth
     scene.fog = new THREE.FogExp2(0x050505, 0.001);
     
     const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
@@ -28,17 +27,15 @@ const StardustBackground = () => {
     renderer.setPixelRatio(window.devicePixelRatio);
     mountRef.current.appendChild(renderer.domElement);
 
-    // Create soft drifting particles (Stardust)
     const geometry = new THREE.BufferGeometry();
     const count = 2000;
     const positions = new Float32Array(count * 3);
     
     for(let i=0; i<count*3; i++) {
-        positions[i] = (Math.random() - 0.5) * 150; // Wide spread
+        positions[i] = (Math.random() - 0.5) * 150;
     }
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     
-    // Soft, glowing dots
     const material = new THREE.PointsMaterial({
         size: 0.2,
         color: 0xffffff,
@@ -50,16 +47,13 @@ const StardustBackground = () => {
     const particles = new THREE.Points(geometry, material);
     scene.add(particles);
 
-    // Animation Loop
     let frameId: number;
     const animate = () => {
       frameId = requestAnimationFrame(animate);
       
-      // Very slow, intimate rotation
       particles.rotation.y += 0.0003;
       particles.rotation.x += 0.0001;
       
-      // Gentle breathing effect on camera
       const time = Date.now() * 0.0005;
       camera.position.z = 50 + Math.sin(time) * 2;
 
@@ -89,34 +83,26 @@ const StardustBackground = () => {
   return <div ref={mountRef} className="absolute inset-0 z-0 pointer-events-none bg-gradient-to-b from-slate-950 via-black to-slate-950" />;
 };
 
-interface NegotiationProps {
-  config: SessionConfig;
-  partner: Partner;
-  sessionId: string; 
-  userId: string;    
-  onNegotiationComplete: (finalConfig: SessionConfig) => void;
-  onSkipMatch: () => void;
-}
 
-export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessionId, userId, onNegotiationComplete, onSkipMatch }) => {
+export const Negotiation: React.FC = () => {
+  const { state, dispatch } = useAppContext();
+  const { sessionConfig, partner, sessionId, user } = state;
+  const config = sessionConfig;
+
   const [step, setStep] = useState<'INPUT' | 'WAITING' | 'REVIEW' | 'AGREED'>('INPUT');
   const [inputTimer, setInputTimer] = useState(15);
   
-  // My choices
   const [myMode, setMyMode] = useState<SessionMode>(SessionMode.DEEP_WORK);
   const [myPreTalk, setMyPreTalk] = useState(5);
   const [myPostTalk, setMyPostTalk] = useState(5);
 
-  // Partner choices
   const [partnerMode, setPartnerMode] = useState<SessionMode | null>(null);
   const [partnerPreTalk, setPartnerPreTalk] = useState<number | null>(null);
   const [partnerPostTalk, setPartnerPostTalk] = useState<number | null>(null);
   const [partnerDuration, setPartnerDuration] = useState<number | null>(null); 
 
-  // Final Result
   const [finalConfig, setFinalConfig] = useState<SessionConfig | null>(null);
 
-  // 1. Timer for Input Phase
   useEffect(() => {
     if (step === 'INPUT') {
       const timer = setInterval(() => {
@@ -132,14 +118,13 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
     }
   }, [step]);
 
-  // 2. LISTEN TO FIRESTORE
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || !user) return;
     const unsub = onSnapshot(doc(db, 'sessions', sessionId), (docSnap) => {
         if (!docSnap.exists()) return;
         const data = docSnap.data();
         const negotiation = data.negotiation || {};
-        const partnerKey = Object.keys(negotiation).find(k => k !== userId);
+        const partnerKey = Object.keys(negotiation).find(k => k !== user.id);
         
         if (partnerKey && negotiation[partnerKey]) {
             const pData = negotiation[partnerKey];
@@ -150,11 +135,10 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
         }
     });
     return () => unsub();
-  }, [sessionId, userId]);
+  }, [sessionId, user]);
 
-  // 3. LOGIC
   useEffect(() => {
-    if (step === 'WAITING' && partnerMode && partnerPreTalk !== null && partnerPostTalk !== null && partnerDuration !== null) {
+    if (step === 'WAITING' && partnerMode && partnerPreTalk !== null && partnerPostTalk !== null && partnerDuration !== null && config) {
         const agreedPre = Math.ceil((myPreTalk + partnerPreTalk) / 2);
         const agreedPost = Math.ceil((myPostTalk + partnerPostTalk) / 2);
         const agreedMode = (myMode === partnerMode) ? myMode : SessionMode.DEEP_WORK; 
@@ -173,8 +157,8 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
     }
   }, [step, partnerMode, partnerPreTalk, partnerPostTalk, partnerDuration, myMode, myPreTalk, myPostTalk, config]);
 
-  // 4. Submit
   const handleSubmit = async (overrideMode?: SessionMode, overridePre?: number, overridePost?: number) => {
+    if (!user || !sessionId || !config) return;
     setStep('WAITING');
     const currentMode = overrideMode || myMode;
     const currentPre = overridePre || myPreTalk;
@@ -182,7 +166,7 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
 
     try {
         await updateDoc(doc(db, 'sessions', sessionId), {
-            [`negotiation.${userId}`]: {
+            [`negotiation.${user.id}`]: {
                 mode: currentMode,
                 preTalk: currentPre,
                 postTalk: currentPost,
@@ -204,37 +188,43 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
     handleSubmit(randomMode, randomPre, randomPost);
   };
 
-  // 5. TIMERS (ADJUSTED TO 2 SECONDS AS REQUESTED)
+  const onNegotiationComplete = (finalConfig: SessionConfig) => {
+    dispatch({ type: 'NEGOTIATION_COMPLETE', payload: finalConfig });
+  };
+
+  const onSkipMatch = () => {
+    dispatch({ type: 'CANCEL_MATCH' });
+  };
+
   useEffect(() => {
     if (step === 'REVIEW') {
-      const timer = setTimeout(() => setStep('AGREED'), 2000); // Faster transition (2s)
+      const timer = setTimeout(() => setStep('AGREED'), 2000);
       return () => clearTimeout(timer);
     }
   }, [step]);
 
   useEffect(() => {
     if (step === 'AGREED' && finalConfig) {
-      const timer = setTimeout(() => onNegotiationComplete(finalConfig), 2000); // Faster transition (2s)
+      const timer = setTimeout(() => onNegotiationComplete(finalConfig), 2000);
       return () => clearTimeout(timer);
     }
   }, [step, finalConfig, onNegotiationComplete]);
 
-  // --- RENDER ---
+  if (!config || !partner || !user) {
+    return null; // Or some loading/error state
+  }
+
   return (
     <div className="flex-1 flex flex-col items-center justify-center relative overflow-hidden h-full w-full">
       
-      {/* 3D BACKGROUND */}
       <StardustBackground />
       
-      {/* Vignette for cinematic feel */}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,rgba(0,0,0,0.8)_100%)] pointer-events-none z-0" />
 
-      {/* CONTENT */}
       <div className="relative z-10 w-full max-w-4xl p-6 mx-auto">
 
         {step === 'INPUT' && (
           <div className="w-full max-w-lg mx-auto animate-in fade-in slide-in-from-bottom-8 duration-500 bg-white/5 backdrop-blur-2xl rounded-3xl border border-white/10 p-1 shadow-2xl">
-            {/* Timer Badge */}
             <div className="absolute -top-10 right-4 flex items-center gap-2">
                 <div className={`text-sm font-bold font-mono px-3 py-1 rounded-full border backdrop-blur-md transition-colors ${
                     inputTimer <= 5 ? 'bg-red-500/20 border-red-500 text-red-400' : 'bg-white/10 border-white/20 text-slate-300'
@@ -253,7 +243,6 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
                 </div>
 
                 <div className="space-y-8">
-                   {/* Elegant Mode Select */}
                    <div className="grid grid-cols-2 gap-4">
                         <button
                           onClick={() => setMyMode(SessionMode.DEEP_WORK)}
@@ -281,7 +270,6 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
                         </button>
                    </div>
 
-                   {/* Minimalist Sliders */}
                    <div className="space-y-6 px-2">
                        <div className="space-y-3">
                          <div className="flex justify-between items-end">
@@ -322,7 +310,6 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
 
         {step === 'WAITING' && (
           <div className="flex flex-col items-center justify-center h-64 animate-in fade-in zoom-in-95 duration-700">
-              {/* Heartbeat / Pulse Effect */}
               <div className="relative">
                   <div className="absolute inset-0 bg-blue-500/30 blur-2xl rounded-full animate-ping opacity-50"></div>
                   <div className="w-20 h-20 bg-gradient-to-tr from-slate-800 to-slate-700 rounded-full flex items-center justify-center relative z-10 border border-white/10 shadow-xl">
@@ -343,9 +330,7 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
                    <div className="h-[1px] w-12 bg-gradient-to-l from-transparent to-slate-500"></div>
                </div>
 
-               {/* Comparison Cards - Side by Side, looking like a unit */}
                <div className="grid grid-cols-2 gap-1 bg-white/5 backdrop-blur-xl rounded-3xl p-1 border border-white/10">
-                  {/* You */}
                   <div className="bg-black/20 rounded-l-2xl p-6 flex flex-col gap-4 text-center">
                       <div className="w-10 h-10 mx-auto bg-slate-800 rounded-full flex items-center justify-center text-slate-300">
                           <User size={18} />
@@ -360,7 +345,6 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
                       </div>
                   </div>
 
-                  {/* Partner */}
                   <div className="bg-black/20 rounded-r-2xl p-6 flex flex-col gap-4 text-center border-l border-white/5">
                       <div className="w-10 h-10 mx-auto bg-blue-900/30 rounded-full flex items-center justify-center text-blue-300">
                           <User size={18} />
@@ -376,7 +360,6 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
                   </div>
                </div>
                
-               {/* Subtle Sync Message */}
                {partnerDuration && partnerDuration !== config.duration && (
                    <div className="mt-6 flex items-center justify-center gap-2 text-amber-200/80 text-sm animate-pulse">
                        <Clock size={14} />
@@ -388,14 +371,12 @@ export const Negotiation: React.FC<NegotiationProps> = ({ config, partner, sessi
 
         {step === 'AGREED' && finalConfig && (
            <div className="text-center animate-in zoom-in-95 fade-in duration-700">
-               {/* The "Close" Connection Visual */}
                <div className="relative mb-8 inline-block">
                    <div className="absolute inset-0 bg-emerald-500/20 blur-3xl rounded-full"></div>
                    <div className="flex items-center gap-4 relative z-10">
                        <div className="w-16 h-16 rounded-full bg-slate-800 border-2 border-slate-700 flex items-center justify-center">
                            <User className="text-slate-400" />
                        </div>
-                       {/* Connecting Link */}
                        <div className="h-1 w-16 bg-gradient-to-r from-slate-700 via-emerald-500 to-blue-900 rounded-full"></div>
                        <div className="w-16 h-16 rounded-full bg-blue-900/30 border-2 border-blue-500/30 flex items-center justify-center">
                            <User className="text-blue-200" />

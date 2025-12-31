@@ -1,19 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Layout } from './components/Layout';
-import { Splash } from './screens/Splash';
-import { Login } from './screens/Login';
-import { Landing } from './screens/Landing';
-import { Dashboard } from './screens/Dashboard';
-import { Matching } from './screens/Matching';
-import { Negotiation } from './screens/Negotiation';
-import { LiveSession } from './screens/LiveSession';
-import { Admin } from './screens/Admin';
 import { useAuth } from './hooks/useAuth';
+import { AppRouter } from './components/AppRouter';
 import { Screen, SessionConfig, Partner, SessionType, SessionDuration, SessionMode } from './types';
 import { db } from './utils/firebaseConfig';
-import { collection, query, where, getDocs, onSnapshot, doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { onSnapshot, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { getAuth, signOut } from 'firebase/auth'; 
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { Landing } from './screens/Landing';
 
 export const App: React.FC = () => {
   // SAFETY CHECK - if auth hook fails
@@ -203,54 +197,25 @@ const handleEndSession = () => {
       onLogout={handleLogout} 
       onAdminClick={() => setCurrentScreen(Screen.ADMIN)}
     >
-      {currentScreen === Screen.SPLASH && <Splash onComplete={handleSplashComplete} />}
-
-      {currentScreen === Screen.LOGIN && (
-  <Login 
-    onLogin={() => {}} 
-    onBack={() => setCurrentScreen(Screen.LANDING)} 
-  />
-)}
-
-      {currentScreen === Screen.DASHBOARD && user && (
-        <Dashboard 
-          user={user} 
-          onStartMatch={handleStartMatch}
-          onLogout={handleLogout} 
-        />
-      )}
-      
-      {currentScreen === Screen.MATCHING && user && (
-        <Matching 
-          user={user}
-          config={sessionConfig} 
-          onMatched={handleMatched}
-          onCancel={handleCancelMatch}
-        />
-      )}
-
-      {currentScreen === Screen.NEGOTIATION && partner && user && (
-        <Negotiation
-          config={sessionConfig}
-          partner={partner}
-          sessionId={sessionId!} 
-          userId={user.id}       
-          onNegotiationComplete={handleNegotiationComplete}
-          onSkipMatch={handleCancelMatch}
-        />
-      )}
-
-      {currentScreen === Screen.SESSION && user && partner && sessionId && (
-        <LiveSession 
-          user={user}
-          partner={partner}
-          config={sessionConfig}
-          sessionId={sessionId}
-          onEndSession={handleEndSession}
-        />
-      )}
-
-      {currentScreen === Screen.ADMIN && <Admin onBack={() => setCurrentScreen(Screen.DASHBOARD)} />}
+      <AppRouter
+        currentScreen={currentScreen}
+        user={user}
+        sessionConfig={sessionConfig}
+        partner={partner}
+        sessionId={sessionId}
+        handleSplashComplete={handleSplashComplete}
+        handleStartMatch={handleStartMatch}
+        handleMatched={handleMatched}
+        handleNegotiationComplete={handleNegotiationComplete}
+        handleCancelMatch={handleCancelMatch}
+        handleEndSession={handleEndSession}
+        handleLogout={handleLogout}
+        handleGetStarted={() => setCurrentScreen(Screen.LOGIN)}
+        handleSignIn={() => setCurrentScreen(Screen.LOGIN)}
+        handleLogin={() => {}}
+        handleBackToLanding={() => setCurrentScreen(Screen.LANDING)}
+        handleBackToDashboard={() => setCurrentScreen(Screen.DASHBOARD)}
+      />
     </Layout>
   );
 };

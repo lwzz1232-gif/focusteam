@@ -4,11 +4,6 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { User } from '../types';
 
-// Strict Dev/Admin Whitelist
-// These accounts will automatically get 'dev' role upon login/signup
-// Admin Whitelist - these emails automatically get admin role
-const ADMIN_EMAILS = ['benchoaib2@gmail.com', 'kirito63561@gmail.com'];
-
 export const useAuth = () => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -57,12 +52,6 @@ if (fbUser) {
             });
           }
 
-          // Force Dev Role for specific emails
-         // Force Admin Role for specific emails
-if (fbUser.email && ADMIN_EMAILS.includes(fbUser.email)) {
-  role = 'admin';
-  await setDoc(userRef, { role: 'admin' }, { merge: true });
-}
           setUser({
             id: fbUser.uid,
             email: fbUser.email || '',

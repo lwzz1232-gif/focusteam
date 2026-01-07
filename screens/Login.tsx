@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '../components/Button';
 import { User } from '../types';
 import { auth, db, googleProvider } from '../utils/firebaseConfig';
@@ -10,8 +10,8 @@ import { Logo } from '../components/Logo';
 import { ToastNotification } from '../components/ToastNotification';
 // PASTE THIS RIGHT AFTER YOUR IMPORTS
 const useMousePosition = () => {
-  const [mousePosition, setMousePosition] = React.useState({ x: 0, y: 0 });
-  React.useEffect(() => {
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+  useEffect(() => {
     const updateMousePosition = (ev: any) => {
       setMousePosition({ x: ev.clientX, y: ev.clientY });
     };

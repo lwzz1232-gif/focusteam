@@ -8,18 +8,7 @@ import { Lock, Mail, User as UserIcon, AlertCircle, CheckCircle2, Chrome, FileTe
 import { AuthMascot } from '../components/AuthMascot';
 import { Logo } from '../components/Logo';
 import { ToastNotification } from '../components/ToastNotification';
-// PASTE THIS RIGHT AFTER YOUR IMPORTS
-const useMousePosition = () => {
-  const [mousePosition, setMousePosition] = React.useState({ x: 0, y: 0 });
-  React.useEffect(() => {
-    const updateMousePosition = (ev: any) => {
-      setMousePosition({ x: ev.clientX, y: ev.clientY });
-    };
-    window.addEventListener('mousemove', updateMousePosition);
-    return () => window.removeEventListener('mousemove', updateMousePosition);
-  }, []);
-  return mousePosition;
-};
+import { useMousePosition } from '../hooks/useMousePosition';
 
 interface LoginProps {
   onLogin: (user: User) => void;

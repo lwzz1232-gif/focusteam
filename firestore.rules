@@ -13,7 +13,7 @@ service cloud.firestore {
     // USERS: Read own, Write own.
     // Admins/Devs can read all (logic handled in app for now, strict rule below)
     match /users/{userId} {
-      allow read: if isSignedIn(); 
+      allow read: if isOwner(userId);
       allow write: if isOwner(userId);
     }
 
@@ -31,9 +31,12 @@ service cloud.firestore {
       );
 
       // WebRTC Signaling
-      match /callerCandidates/{id} { allow read, write: if isSignedIn(); }
-      match /calleeCandidates/{id} { allow read, write: if isSignedIn(); }
-      match /messages/{id} { allow read, write: if isSignedIn(); }
+      function isParticipant(sessionId) {
+        return request.auth.uid in get(/databases/$(database)/documents/sessions/$(sessionId)).data.participants;
+      }
+      match /callerCandidates/{id} { allow read, write: if isSignedIn() && isParticipant(sessionId); }
+      match /calleeCandidates/{id} { allow read, write: if isSignedIn() && isParticipant(sessionId); }
+      match /messages/{id} { allow read, write: if isSignedIn() && isParticipant(sessionId); }
     }
 
     // REPORTS: Anyone signed in can create

@@ -4,10 +4,8 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { User } from '../types';
 
-// Strict Dev/Admin Whitelist
-// These accounts will automatically get 'dev' role upon login/signup
-// Admin Whitelist - these emails automatically get admin role
-const ADMIN_EMAILS = ['benchoaib2@gmail.com', 'kirito63561@gmail.com'];
+// No longer needed, roles are managed in Firestore
+// const ADMIN_EMAILS = ['...'];
 
 export const useAuth = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -57,12 +55,9 @@ if (fbUser) {
             });
           }
 
-          // Force Dev Role for specific emails
-         // Force Admin Role for specific emails
-if (fbUser.email && ADMIN_EMAILS.includes(fbUser.email)) {
-  role = 'admin';
-  await setDoc(userRef, { role: 'admin' }, { merge: true });
-}
+          // Role is now directly read from the document, so no special logic is needed here.
+          // The manual override via ADMIN_EMAILS has been removed.
+
           setUser({
             id: fbUser.uid,
             email: fbUser.email || '',
@@ -74,9 +69,15 @@ if (fbUser.email && ADMIN_EMAILS.includes(fbUser.email)) {
           setUser(null);
         }
       } catch (err: any) {
-        console.error("Auth Error:", err);
-        setError(err.message);
-        setUser(null); // Ensure no partial user state
+        console.error("Authentication Error:", err.code, err.message);
+        let errorMessage = `An unexpected error occurred during authentication. (Code: ${err.code})`;
+        if (err.code === 'auth/network-request-failed') {
+          errorMessage = "Network error. Please check your connection.";
+        } else if (err.message.includes("banned")) {
+          errorMessage = err.message; // Use the specific ban message
+        }
+        setError(errorMessage);
+        setUser(null);
       } finally {
         setLoading(false);
       }

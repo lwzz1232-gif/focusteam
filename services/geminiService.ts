@@ -1,42 +1,29 @@
-import { GoogleGenAI } from "@google/genai";
 import { SessionType } from "../types";
 
-// Helper to safely get env vars in Vite
-const getEnv = (key: string) => {
-  if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
-    return (import.meta as any).env[key];
-  }
-  return '';
-};
-
-// Use NEXT_PUBLIC_GEMINI_API_KEY for client-side access in Vite
-const apiKey = getEnv('NEXT_PUBLIC_GEMINI_API_KEY');
-
-let ai: GoogleGenAI | null = null;
-if (apiKey) {
-    ai = new GoogleGenAI({ apiKey: apiKey });
-} else {
-    console.warn("Gemini API Key missing. Icebreakers will be simulated.");
-}
+const FALLBACK_ICEBREAKER = "What is your main goal for this session?";
 
 export const generateIcebreaker = async (sessionType: SessionType): Promise<string> => {
-  if (!ai) {
-      return "What is your main goal for this session?";
-  }
-
   try {
-    const model = "gemini-2.5-flash";
-    const prompt = `Generate a single, fun, short, and engaging icebreaker question for two people who are about to start a "${sessionType}" session. 
-    Keep it under 20 words. Do not include quotes.`;
-
-    const response = await ai.models.generateContent({
-      model: model,
-      contents: prompt,
+    const response = await fetch('/api/generate-icebreaker', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ sessionType }),
     });
 
-    return response.text.trim();
+    if (!response.ok) {
+      // Log the server's error response for debugging
+      const errorData = await response.json();
+      console.error("API Error:", errorData.error || `HTTP status ${response.status}`);
+      return FALLBACK_ICEBREAKER;
+    }
+
+    const data = await response.json();
+    return data.icebreaker || FALLBACK_ICEBREAKER;
+
   } catch (error) {
-    console.error("Gemini AI Error:", error);
-    return "What is your main goal for this session?"; // Fallback
+    console.error("Network or Client-side Error:", error);
+    return FALLBACK_ICEBREAKER;
   }
 };

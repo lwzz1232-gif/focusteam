@@ -10,11 +10,22 @@ service cloud.firestore {
       return request.auth.uid == userId;
     }
 
-    // USERS: Read own, Write own.
-    // Admins/Devs can read all (logic handled in app for now, strict rule below)
+    // Check the requesting user's role from their own document
+    function isAdmin() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // USERS:
     match /users/{userId} {
       allow read: if isSignedIn(); 
-      allow write: if isOwner(userId);
+
+      // Allow users to create their own profile, but they cannot assign themselves a role.
+      // The default 'user' role is assigned by the useAuth hook.
+      allow create: if isOwner(userId);
+
+      // Allow users to update their own data, BUT NOT their role.
+      // Allow admins to update anything in any user document.
+      allow update: if (isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin();
     }
 
     // QUEUE: Users can manage their own entry

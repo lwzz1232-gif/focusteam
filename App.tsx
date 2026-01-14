@@ -64,6 +64,7 @@ export const App: React.FC = () => {
       setCurrentScreen(Screen.LOGIN);
     } catch (error) {
       console.error("Error signing out:", error);
+      alert("An error occurred while signing out. Please try again.");
     }
   };
 
@@ -150,7 +151,7 @@ const handleSplashComplete = () => {
           setCurrentScreen(Screen.SESSION); // Skip matching & negotiation
       } catch (e) {
           console.error("Failed to create test session:", e);
-          alert("Error starting test mode. Check console.");
+          alert("Could not start Test Mode session. Please check the console for errors.");
       }
     } else {
       // NORMAL USER FLOW (Unchanged)

@@ -17,25 +17,8 @@ export const getLiveStats = () => ({
 });
 
 // Notifications (Still useful for Layout)
-import { db } from '../utils/firebaseConfig';
-import { collection, query, getDocs, orderBy } from 'firebase/firestore';
+export { getNotifications } from './firebaseService';
 
-export const getNotifications = async (userId: string): Promise<Notification[]> => {
-    try {
-      const q = query(
-        collection(db, 'users', userId, 'notifications'),
-        orderBy('timestamp', 'desc')
-      );
-      const snap = await getDocs(q);
-      return snap.docs.map(d => ({
-        ...d.data(),
-        id: d.id
-      } as Notification));
-    } catch(e) {
-      console.error("Failed to fetch notifications:", e);
-      return [];
-    }
-};
 export const markNotificationRead = (userId: string, noteId: string) => {};
 
 // Admin Actions (Now handled directly in Admin.tsx, kept as safe no-ops)

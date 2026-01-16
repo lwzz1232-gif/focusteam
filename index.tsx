@@ -1,5 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';
+import { SessionProvider } from './context/SessionContext';
 import App from './App';
 import './index.css';
 
@@ -11,6 +13,10 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <App />
+    <SessionProvider>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </SessionProvider>
   </React.StrictMode>
 );

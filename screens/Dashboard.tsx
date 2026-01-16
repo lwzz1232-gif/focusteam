@@ -5,14 +5,14 @@ import { Briefcase, BookOpen, Code, Clock, Coffee, Play, FlaskConical, LogOut, A
 import { LiveRequests } from '../components/LiveRequests';
 import { db } from '../utils/firebaseConfig';
 import { collection, onSnapshot } from 'firebase/firestore';
+import * as firebaseService from '../services/firebaseService';
 
 interface DashboardProps {
     user: User;
     onStartMatch: (config: SessionConfig) => void;
-    onLogout: () => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogout }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch }) => {
   const [selectedType, setSelectedType] = useState<SessionType>(SessionType.STUDY);
   const [selectedDuration, setSelectedDuration] = useState<SessionDuration>(SessionDuration.MIN_30);
   
@@ -60,14 +60,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogo
     { val: SessionDuration.HOUR_2, label: '2 Hours', desc: 'Deep work' },
   ];
 
-  const handleStart = () => {
-    onStartMatch({
+  const handleStart = async () => {
+    const config = {
       type: selectedType,
       duration: selectedDuration,
       mode: SessionMode.DEEP_WORK,
       preTalkMinutes: selectedDuration === SessionDuration.TEST ? 0.5 : 5,
       postTalkMinutes: selectedDuration === SessionDuration.TEST ? 0.5 : 5
-    });
+    };
+
+    if (selectedDuration === SessionDuration.TEST) {
+      const botPartner = {
+        id: 'bot-' + Date.now(),
+        name: 'Test Bot',
+        type: config.type
+      };
+      await firebaseService.createTestSession(user, config, botPartner);
+      onStartMatch(config);
+    } else {
+      onStartMatch(config);
+    }
   };
 
   return (

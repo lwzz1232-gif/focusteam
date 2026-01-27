@@ -1,35 +1,30 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '../components/Button';
-import { SessionType, SessionDuration, SessionConfig, SessionMode, User } from '../types';
-import { Briefcase, BookOpen, Code, Clock, Coffee, Play, FlaskConical, LogOut, ArrowDown, ShieldCheck } from 'lucide-react'; // Added ShieldCheck icon
+import { SessionType, SessionDuration, SessionConfig, SessionMode } from '../types';
+import { Briefcase, BookOpen, Code, Clock, Coffee, Play, FlaskConical, ArrowDown, ShieldCheck } from 'lucide-react';
 import { LiveRequests } from '../components/LiveRequests';
 import { db } from '../utils/firebaseConfig';
 import { collection, onSnapshot } from 'firebase/firestore';
+import { useAuth } from '../hooks/useAuth';
+import { useSession } from '../context/SessionContext';
 
-interface DashboardProps {
-    user: User;
-    onStartMatch: (config: SessionConfig) => void;
-    onLogout: () => void;
-}
-
-export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogout }) => {
+export const Dashboard: React.FC = () => {
+  const { user } = useAuth();
+  const { handleStartMatch } = useSession();
   const [selectedType, setSelectedType] = useState<SessionType>(SessionType.STUDY);
   const [selectedDuration, setSelectedDuration] = useState<SessionDuration>(SessionDuration.MIN_30);
-  
-  // 1. TRACK LOBBY COUNT
   const [lobbyCount, setLobbyCount] = useState(0);
 
-  // 2. LISTEN TO DATABASE
- useEffect(() => {
+  useEffect(() => {
+    if (!user?.id) return;
+
     const unsub = onSnapshot(collection(db, 'waiting_room'), (snap) => {
       const now = Date.now();
-      const fiveMinutesAgo = now - (5 * 60 * 1000); // 5 minutes in milliseconds
+      const fiveMinutesAgo = now - (5 * 60 * 1000);
 
       const activePeople = snap.docs.filter(doc => {
         const data = doc.data();
         const isMe = data.userId === user.id;
-        
-        // If the person joined more than 5 minutes ago, we treat them as a "ghost"
         const joinedAt = data.joinedAt ? data.joinedAt.toMillis() : 0;
         const isFresh = joinedAt > fiveMinutesAgo;
 
@@ -39,9 +34,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogo
       setLobbyCount(activePeople.length);
     });
     return () => unsub();
-  }, [user.id]);
+  }, [user?.id]);
 
-  // 3. SCROLL HELPER
   const scrollToLobby = () => {
     const element = document.getElementById('live-lobby-section');
     if (element) element.scrollIntoView({ behavior: 'smooth' });
@@ -61,19 +55,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogo
   ];
 
   const handleStart = () => {
-    onStartMatch({
+    handleStartMatch({
       type: selectedType,
       duration: selectedDuration,
       mode: SessionMode.DEEP_WORK,
       preTalkMinutes: selectedDuration === SessionDuration.TEST ? 0.5 : 5,
       postTalkMinutes: selectedDuration === SessionDuration.TEST ? 0.5 : 5
-    });
+    }, user);
   };
+
+  if (!user) {
+    return null; // Or a loading spinner
+  }
 
   return (
     <div className="flex-1 flex flex-col items-center justify-start p-4 max-w-5xl mx-auto w-full overflow-y-auto relative">
       
-      {/* --- NEW: DYNAMIC LOBBY NOTIFICATION --- */}
       {lobbyCount > 0 && (
           <div 
             onClick={scrollToLobby}
@@ -94,14 +91,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogo
           </div>
       )}
 
-      {/* Header */}
       <div className={`w-full mb-6 text-center md:text-left ${lobbyCount > 0 ? '' : 'pt-8'}`}>
         <h1 className="text-3xl font-bold mb-2"></h1>
         <p className="text-slate-400">Choose your focus area and time block to find a match.</p>
       </div>
 
       <div className="grid md:grid-cols-2 gap-8 w-full mb-8">
-        {/* Session Type */}
         <div className="space-y-4">
           <h3 className="text-lg font-semibold text-slate-200 flex items-center gap-2">
             <span className="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs">1</span>
@@ -126,7 +121,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogo
           </div>
         </div>
 
-        {/* Duration */}
         <div className="space-y-4">
           <h3 className="text-lg font-semibold text-slate-200 flex items-center gap-2">
             <span className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-xs">2</span>
@@ -151,7 +145,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogo
               </button>
             ))}
 
-            {/* Test Mode Button */}
             {(user.role === 'admin' || user.role === 'dev') && (
                <button
                   onClick={() => setSelectedDuration(SessionDuration.TEST)}
@@ -178,22 +171,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, onStartMatch, onLogo
           className="w-full py-4 text-lg shadow-blue-500/25 shadow-xl mb-3"
         >
           <Play size={20} className="fill-current" />
-          {/* Dynamic Button Text */}
           {lobbyCount > 0 ? 'Join Queue (Fast Match)' : 'Find Partner'}
         </Button>
         
-        {/* --- ADDED: EXPLANATION TEXT --- */}
         <p className="text-xs text-slate-500 flex items-center justify-center gap-1.5">
            <ShieldCheck size={12} className="text-slate-600"/>
            If no exact match, we'll auto-connect you with the closest duration.
         </p>
       </div>
 
-      {/* --- LIVE REQUESTS LOBBY (With ID for scrolling) --- */}
       <div id="live-lobby-section" className="w-full border-t border-white/5 pt-8 pb-8">
          <LiveRequests 
             currentUser={user} 
-            onJoinSession={(partnerId, config) => onStartMatch(config)} 
+            onJoinSession={(partnerId, config) => handleStartMatch(config, user)}
          />
       </div>
 
